@@ -1,7 +1,7 @@
-# version: '3.8'
+version: '3.8'
 
 services:
-  # 1. THE MANAGER (Your Backend & Frontend)
+  # 1. THE MANAGER
   manager:
     build: ./server
     container_name: contest_manager
@@ -9,62 +9,80 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - JUDGE0_URL=http://judge0:2358
-      # The Launcher will eventually inject the PIN here.
-      # For now, we default to '1234' for testing.
+      - JUDGE0_URL=http://judge0-server:2358
       - CLASS_PIN=${CLASS_PIN:-1234}
     volumes:
-      # This maps the database file to your host machine
-      # so you don't lose data if you restart the server.
       - ./data:/app/data
-      - ./client:/app/client:ro  # <--- ADD THIS LINE (Maps your local client folder to the container)
-      # Note: We map it to /app/client because WORKDIR is /app
+      - ./client:/app/client:ro
     depends_on:
-      - judge0
+      - judge0-server
 
-  # 2. THE JUDGE (Code Execution Engine)
-  judge0:
-    image: judge0/judge0:latest
-    container_name: contest_judge
+  # 2. JUDGE SERVER (API)
+  judge0-server:
+    image: judge0/judge0:1.13.1
+    container_name: contest_judge_server
+    command: ["./scripts/server"]
     privileged: true
+    restart: always
     ports:
       - "2358:2358"
-    environment:
+    environment: &judge0-env
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - REDIS_URL=redis://redis:6379
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=postgres
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST_AUTH_METHOD=trust
+      - JUDGE0_TELEMETRY_ENABLE=false
+    # --- FIX START: READ-WRITE PERMISSIONS ---
     volumes:
-      - ./judge0_conf:/judge0.conf:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw  # <--- CHANGED FROM ro TO rw
+    security_opt:
+      - seccomp:unconfined
+    # --- FIX END ---
     depends_on:
       - redis
       - postgres
 
-  # 3. REDIS (Judge0's Queue)
-  redis:
-    image: redis:alpine
-    container_name: contest_redis
+  # 3. JUDGE WORKER (Execution)
+  judge0-worker:
+    image: judge0/judge0:1.13.1
+    container_name: contest_judge_worker
+    command: ["./scripts/workers"]
+    privileged: true
+    restart: always
+    environment: *judge0-env
+    # --- FIX START: READ-WRITE PERMISSIONS ---
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw  # <--- CHANGED FROM ro TO rw
+    security_opt:
+      - seccomp:unconfined
+    # --- FIX END ---
+    depends_on:
+      - judge0-server
 
-  # 4. CLOUDFLARE TUNNEL (Public Access)
-  # This creates a temporary public URL every time you run it.
+  # 4. REDIS
+  redis:
+    image: redis:6.0
+    container_name: contest_redis
+    restart: always
+
+  # 5. POSTGRES
+  postgres:
+    image: postgres:13
+    container_name: contest_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+
+  # 6. TUNNEL
   tunnel:
     image: cloudflare/cloudflared:latest
     container_name: contest_tunnel
     command: tunnel --url http://manager:3000
     depends_on:
       - manager
-
-  postgres:
-    image: postgres:13
-    container_name: contest_postgres
-    environment:
-      POSTGRES_DB: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-volumes:
-  postgres_data:

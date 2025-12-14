@@ -1,4 +1,5 @@
 // server/server.js
+const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
@@ -152,6 +153,60 @@ app.post('/api/config', (req, res) => {
     } catch (err) {
         console.error("POST Config Error:", err);
         res.status(500).json({ error: "Failed to update config" });
+    }
+});
+
+// --- EXECUTION API ---
+
+const JUDGE0_URL = process.env.JUDGE0_URL || 'http://judge0:2358';
+
+app.post('/api/run', async (req, res) => {
+    try {
+        const { code, language_id, stdin } = req.body;
+
+        // 1. Prepare Payload for Judge0
+        // Judge0 expects base64 encoded strings
+        const payload = {
+            source_code: Buffer.from(code).toString('base64'),
+            language_id: language_id || 71, // Default to Python (71)
+            stdin: Buffer.from(stdin || "").toString('base64'),
+            base64_encoded: true,
+            wait: true // Wait for result (Block request until done)
+        };
+
+        // ... (Axios request code) ...
+        const response = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=true&wait=true`, payload);
+        const result = response.data;
+        
+        // --- IMPROVED LOGIC ---
+        
+        // Decode Output
+        const output = result.stdout ? Buffer.from(result.stdout, 'base64').toString() : null;
+        const error = result.stderr ? Buffer.from(result.stderr, 'base64').toString() : null;
+        const compile_output = result.compile_output ? Buffer.from(result.compile_output, 'base64').toString() : null;
+        
+        // Construct the final message
+        let finalOutput = "";
+        
+        if (output) finalOutput = output;
+        else if (error) finalOutput = "⚠️ Runtime Error:\n" + error;
+        else if (compile_output) finalOutput = "⚠️ Compilation Error:\n" + compile_output;
+        else {
+             // If everything is empty, check the status
+             finalOutput = `⚠️ No Output Received.\nStatus: ${result.status.description}`;
+        }
+
+        // 4. Return to Student
+        res.json({
+            output: output || error || compile_output || "No Output",
+            status: result.status.description,
+            time: result.time,
+            memory: result.memory
+        });
+
+    } catch (err) {
+        console.error("Judge0 Error:", err.message);
+        res.status(500).json({ error: "Execution Engine Failed" });
     }
 });
 

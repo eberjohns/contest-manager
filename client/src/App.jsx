@@ -42,6 +42,29 @@ function StudentDashboard() {
   const [code, setCode] = useState("# Write your code here");
   const [config, setConfig] = useState({ autocomplete: true, highlighting: true });
 
+  const [output, setOutput] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
+
+  const handleRun = async () => {
+    setIsRunning(true);
+    setOutput("Running...");
+    
+    try {
+      const res = await api.post('/api/run', {
+        code: code,
+        language_id: 71, // Python (Hardcoded for now)
+        stdin: "" // We will add an input box later
+      });
+      
+      // If success, show output. If error, show the error message.
+      setOutput(res.data.output);
+    } catch (err) {
+      setOutput("Error: " + (err.response?.data?.error || "Server Connection Failed"));
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
   // Poll for config changes every 5 seconds
   useEffect(() => {
     const fetchConfig = () => {
@@ -78,28 +101,37 @@ function StudentDashboard() {
       {/* Header */}
       <div style={{ padding: '10px 20px', background: '#2d2d2d', color: 'white', display: 'flex', justifyContent: 'space-between' }}>
         <h2>📝 Contest Area</h2>
-        <div>
-          <span>Mode: {config.autocomplete ? "Assisted" : "Hardcore"}</span>
-        </div>
+        <div><span>Mode: {config.autocomplete ? "Assisted" : "Hardcore"}</span></div>
       </div>
 
-      {/* The Editor */}
-      <div style={{ flex: 1 }}>
+      {/* Editor Area (Takes 70% height) */}
+      <div style={{ flex: 2, borderBottom: '1px solid #333' }}>
         <Editor
           height="100%"
           theme="vs-dark"
-          // If highlighting is OFF, we trick it by saying the language is "plaintext"
           defaultLanguage="python"
           language={config.highlighting ? "python" : "plaintext"}
           value={code}
-          onChange={(value) => setCode(value)}
+          onChange={setCode}
           options={editorOptions}
         />
+      </div>
+
+      {/* Output Console (Takes 30% height) */}
+      <div style={{ flex: 1, background: '#111', color: '#0f0', padding: '15px', fontFamily: 'monospace', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+        <div style={{ color: '#888', marginBottom: '5px' }}>// TERMINAL OUTPUT</div>
+        {output}
       </div>
       
       {/* Action Bar */}
       <div style={{ padding: '10px', background: '#252526', textAlign: 'right' }}>
-         <button style={styles.btn}>Run Code</button>
+         <button 
+           onClick={handleRun} 
+           disabled={isRunning}
+           style={{...styles.btn, opacity: isRunning ? 0.5 : 1}}
+         >
+           {isRunning ? "Running..." : "▶ Run Code"}
+         </button>
          <button style={{...styles.btn, background: '#28a745', marginLeft: '10px'}}>Submit</button>
       </div>
     </div>
