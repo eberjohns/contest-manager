@@ -52,15 +52,38 @@ db.exec(`
     code TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+
+  INSERT OR IGNORE INTO config (key, value) VALUES ('autocomplete', 'true');
+  INSERT OR IGNORE INTO config (key, value) VALUES ('highlighting', 'true');
 `);
 
 console.log("✅ Database initialized successfully.");
+
+// Ensure Config Table Exists (Run this safely every time)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+    INSERT OR IGNORE INTO config (key, value) VALUES ('autocomplete', 'true');
+    INSERT OR IGNORE INTO config (key, value) VALUES ('highlighting', 'true');
+  `);
+} catch (err) {
+  console.error("Config Table Error:", err.message);
+}
 
 // --- 3. API ROUTES (The Skeleton) ---
 
 // Serve the Frontend Files
 // This line tells Express to serve files from the 'client' folder
-app.use(express.static(path.join(__dirname, 'client')));
+// Serve the React App (Production Build)
+app.use(express.static(path.join(__dirname, 'client/dist')));
 
 // Explicitly send index.html for the home route
 app.get('/', (req, res) => {
@@ -99,6 +122,46 @@ app.post('/api/login', (req, res) => {
     db.prepare('INSERT INTO users (username, role, token) VALUES (?, ?, ?)').run(username, 'STUDENT', token);
 
     return res.json({ role: 'STUDENT', token, username });
+});
+
+// --- CONFIG API ---
+
+app.get('/api/config', (req, res) => {
+    try {
+        const rows = db.prepare('SELECT key, value FROM config').all();
+        const config = {};
+        // Convert string 'true'/'false' back to boolean
+        rows.forEach(row => config[row.key] = (row.value === 'true'));
+        res.json(config);
+    } catch (err) {
+        console.error("GET Config Error:", err);
+        res.status(500).json({ error: "Failed to fetch config" });
+    }
+});
+
+app.post('/api/config', (req, res) => {
+    try {
+        const { key, value } = req.body;
+        console.log(`[CONFIG CHANGE] Setting ${key} to ${value}`); // <--- DEBUG LOG
+        
+        // Store as string 'true' or 'false'
+        const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
+        stmt.run(key, String(value));
+        
+        res.json({ success: true });
+    } catch (err) {
+        console.error("POST Config Error:", err);
+        res.status(500).json({ error: "Failed to update config" });
+    }
+});
+
+// Handle React Routing (Redirect all unknown routes to index.html)
+app.get('*', (req, res) => {
+    // If the request is for an API, don't return HTML
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'API endpoint not found' });
+    }
+    res.sendFile(path.join(__dirname, 'client/dist/index.html'));
 });
 
 // --- 4. STARTUP MESSAGE ---
