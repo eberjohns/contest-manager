@@ -55,6 +55,8 @@ function StudentDashboard() {
 
   const [questionStartTime, setQuestionStartTime] = useState(null);
 
+  const [submitted, setSubmitted] = useState(false);
+
   const navigate = useNavigate();
 
   const logout = () => {
@@ -91,6 +93,11 @@ function StudentDashboard() {
     const username = localStorage.getItem('username');
     if (!username || !activeQuestion) return;
 
+    if (submitted) {
+      alert("You have already submitted this question.");
+      return;
+    }
+
     const finalElapsed = Date.now() - questionStartTime; // 🔒 freeze time
 
     try {
@@ -103,10 +110,16 @@ function StudentDashboard() {
 
       alert(`✅ Submitted in ${formatTime(finalElapsed)}!`);
 
-      // OPTIONAL: stop timer after submit
-      setQuestionStartTime(null);
+      setSubmitted(true);          // 🔒 lock submit
+      setQuestionStartTime(null);  // ⏱ stop timer
+
     } catch (err) {
-      alert("Submission Failed");
+      if (err.response?.status === 409) {
+        alert("❌ You can submit this question only once.");
+        setSubmitted(true); // sync UI with backend
+      } else {
+        alert("Submission Failed");
+      }
     }
   };
 
@@ -189,6 +202,7 @@ function StudentDashboard() {
             setCode(q.template || "");
             setQuestionStartTime(Date.now());
             setElapsed(0);
+            setSubmitted(false);
           }}
           value={activeQuestion?.id || ""}
         >
@@ -253,8 +267,17 @@ function StudentDashboard() {
             <button onClick={handleRun} disabled={isRunning} style={styles.btn}>
               {isRunning ? "Running..." : "▶ Run"}
             </button>
-            <button onClick={handleSubmit} style={{...styles.btn, background: '#28a745', marginLeft: '10px'}}>
-              Submit
+            <button
+              onClick={handleSubmit}
+              disabled={submitted}
+              style={{
+                ...styles.btn,
+                background: submitted ? '#555' : '#28a745',
+                marginLeft: '10px',
+                cursor: submitted ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {submitted ? "Submitted" : "Submit"}
             </button>
           </div>
         </div>

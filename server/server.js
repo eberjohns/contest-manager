@@ -39,13 +39,16 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT,
-    question_id TEXT,
+    username TEXT NOT NULL,
+    question_id TEXT NOT NULL,
     status TEXT,     -- 'PASS', 'FAIL', 'ERROR'
     code TEXT,
     elapsed_time INTEGER, -- Time taken in milliseconds
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_question
+  ON submissions(username, question_id);
 
   CREATE TABLE IF NOT EXISTS questions (
       id TEXT PRIMARY KEY,
@@ -257,6 +260,18 @@ app.post('/api/submit', async (req, res) => {
     const { username, question_id, code, elapsed_time } = req.body;
     
     try {
+        // 0. Prevent multiple submissions
+        const existing = db.prepare(`
+          SELECT 1 FROM submissions 
+          WHERE username = ? AND question_id = ?
+        `).get(username, question_id);
+
+        if (existing) {
+          return res.status(409).json({
+            error: "You have already submitted this question."
+          });
+        }
+
         // 1. Fetch the Question & Test Cases
         const question = db.prepare('SELECT test_cases FROM questions WHERE id = ?').get(question_id);
         if (!question) return res.status(404).json({ error: "Question not found" });
