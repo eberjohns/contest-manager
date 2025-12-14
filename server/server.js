@@ -40,7 +40,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT,
-    question_id INTEGER,
+    question_id TEXT,
     status TEXT,     -- 'PASS', 'FAIL', 'ERROR'
     code TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -193,9 +193,8 @@ app.post('/api/submit', (req, res) => {
 // 2. Get Leaderboard (For Admin)
 app.get('/api/leaderboard', (req, res) => {
     try {
-        // Get the latest submission for each user
         const rows = db.prepare(`
-            SELECT username, status, timestamp 
+            SELECT username, question_id, status, timestamp 
             FROM submissions 
             ORDER BY timestamp DESC
         `).all();

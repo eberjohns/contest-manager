@@ -48,6 +48,8 @@ function StudentDashboard() {
   const [questions, setQuestions] = useState([]);
   const [activeQuestion, setActiveQuestion] = useState(null);
 
+  const [customInput, setCustomInput] = useState("");
+
   const handleRun = async () => {
     setIsRunning(true);
     setOutput("Running...");
@@ -55,11 +57,9 @@ function StudentDashboard() {
     try {
       const res = await api.post('/api/run', {
         code: code,
-        language_id: 71, // Python (Hardcoded for now)
-        stdin: "" // We will add an input box later
+        language_id: 71,
+        stdin: customInput // <--- PASS THE INPUT HERE
       });
-      
-      // If success, show output. If error, show the error message.
       setOutput(res.data.output);
     } catch (err) {
       setOutput("Error: " + (err.response?.data?.error || "Server Connection Failed"));
@@ -167,7 +167,7 @@ function StudentDashboard() {
         {/* RIGHT PANEL: Editor & Output */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           
-          {/* Editor */}
+          {/* Editor (50% height) */}
           <div style={{ flex: 2 }}>
             <Editor
               height="100%"
@@ -180,9 +180,20 @@ function StudentDashboard() {
             />
           </div>
 
-          {/* Terminal / Output */}
+          {/* INPUT BOX (New!) */}
+          <div style={{ height: '100px', background: '#1e1e1e', padding: '10px', borderTop: '1px solid #333' }}>
+             <div style={{ color: '#888', marginBottom: '5px', fontSize: '0.8em' }}>STDIN (Input for your code)</div>
+             <textarea 
+                style={{ width: '100%', height: '60px', background: '#252526', color: 'white', border: '1px solid #444', fontFamily: 'monospace' }}
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                placeholder="Enter input here (e.g. 10 20)"
+             />
+          </div>
+
+          {/* OUTPUT BOX */}
           <div style={{ flex: 1, background: '#111', padding: '15px', fontFamily: 'monospace', overflow: 'auto', borderTop: '1px solid #333' }}>
-            <div style={{ color: '#888', marginBottom: '5px' }}>// TERMINAL</div>
+            <div style={{ color: '#888', marginBottom: '5px' }}>// TERMINAL OUTPUT</div>
             <pre style={{ margin: 0, color: '#0f0' }}>{output}</pre>
           </div>
 
@@ -284,6 +295,7 @@ function AdminDashboard() {
               <thead>
                 <tr style={{borderBottom: '1px solid #555'}}>
                   <th>User</th>
+                  <th>Problem</th>
                   <th>Status</th>
                   <th>Time</th>
                 </tr>
@@ -292,6 +304,7 @@ function AdminDashboard() {
                 {submissions.map((sub, i) => (
                   <tr key={i} style={{borderBottom: '1px solid #333'}}>
                     <td style={{padding: '8px'}}>{sub.username}</td>
+                    <td style={{padding: '8px', color: '#4da6ff'}}>{sub.question_id}</td>
                     <td style={{padding: '8px', color: '#0f0'}}>{sub.status}</td>
                     <td style={{padding: '8px', fontSize: '0.8em', color: '#aaa'}}>
                       {new Date(sub.timestamp).toLocaleTimeString()}
