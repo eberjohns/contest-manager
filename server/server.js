@@ -163,6 +163,8 @@ app.post('/api/config', (req, res) => {
     }
 });
 
+// --- ADMIN: QUESTION MANAGEMENT ---
+
 // Get all questions (for students and admin)
 app.get('/api/questions', (req, res) => {
     try {
@@ -225,24 +227,6 @@ app.post('/api/questions', async (req, res) => {
     }
 });
 
-// --- ADMIN: QUESTION MANAGEMENT ---
-
-// Create a new Question
-app.post('/api/questions', (req, res) => {
-    const { id, title, description, template, test_cases } = req.body;
-    try {
-        const stmt = db.prepare(`
-            INSERT INTO questions (id, title, description, template, test_cases)
-            VALUES (?, ?, ?, ?, ?)
-        `);
-        // Store test cases as JSON string
-        stmt.run(id, title, description, template, JSON.stringify(test_cases));
-        res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Failed to create question. ID might be taken." });
-    }
-});
 
 // Delete a Question
 app.delete('/api/questions/:id', (req, res) => {
@@ -314,18 +298,25 @@ app.post('/api/submit', async (req, res) => {
 
 // 2. Get Leaderboard (For Admin)
 app.get('/api/leaderboard', (req, res) => {
-    try {
-        // JOIN submissions with questions to get the Title
-        const rows = db.prepare(`
-            SELECT s.username, q.title, s.status, s.elapsed_time, s.timestamp 
-            FROM submissions s
-            LEFT JOIN questions q ON s.question_id = q.id
-            ORDER BY s.timestamp ASC
-        `).all();
-        res.json(rows);
-    } catch (err) {
-        res.status(500).json({ error: "Leaderboard error" });
-    }
+  try {
+    const rows = db.prepare(`
+      SELECT 
+        s.username,
+        s.question_id,
+        q.title,
+        s.status,
+        s.elapsed_time,
+        s.timestamp
+      FROM submissions s
+      LEFT JOIN questions q ON s.question_id = q.id
+      ORDER BY s.elapsed_time ASC
+    `).all();
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Leaderboard error" });
+  }
 });
 
 // --- EXECUTION API ---

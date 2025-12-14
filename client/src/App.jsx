@@ -55,6 +55,13 @@ function StudentDashboard() {
 
   const [questionStartTime, setQuestionStartTime] = useState(null);
 
+  const navigate = useNavigate();
+
+  const logout = () => {
+    localStorage.clear();
+    navigate('/');
+  };
+
   const formatTime = (elapsed) => {
     if (!elapsed) return "0:00";
     const minutes = Math.floor(elapsed / 60000);
@@ -82,20 +89,22 @@ function StudentDashboard() {
 
   const handleSubmit = async () => {
     const username = localStorage.getItem('username');
-    if (!username) return alert("Please log in again!");
-    if (!activeQuestion) return;
+    if (!username || !activeQuestion) return;
 
-    const startTime = localStorage.getItem('startTime');
-    const elapsed = startTime ? Date.now() - parseInt(startTime) : 0;
+    const finalElapsed = Date.now() - questionStartTime; // 🔒 freeze time
 
     try {
       await api.post('/api/submit', {
-        username: username,
-        question_id: activeQuestion.id, // <--- DYNAMIC ID
-        code: code,
-        elapsed_time: elapsed
+        username,
+        question_id: activeQuestion.id,
+        code,
+        elapsed_time: finalElapsed
       });
-      alert(`✅ Submitted for ${activeQuestion.title} in ${formatTime(elapsed)}!`);
+
+      alert(`✅ Submitted in ${formatTime(finalElapsed)}!`);
+
+      // OPTIONAL: stop timer after submit
+      setQuestionStartTime(null);
     } catch (err) {
       alert("Submission Failed");
     }
@@ -129,6 +138,7 @@ function StudentDashboard() {
       if (res.data.length > 0) {
         setActiveQuestion(res.data[0]); // Select the first one by default
         setCode(res.data[0].template || "# Write your code here"); // Load template
+        setQuestionStartTime(Date.now()); // Start timer for first question
       }
     });
 
@@ -154,14 +164,14 @@ function StudentDashboard() {
 
   // Timer effect
   useEffect(() => {
-    const startTime = localStorage.getItem('startTime');
-    if (startTime) {
-      const interval = setInterval(() => {
-        setElapsed(Date.now() - parseInt(startTime));
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, []);
+    if (!questionStartTime) return;
+
+    const interval = setInterval(() => {
+      setElapsed(Date.now() - questionStartTime);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [questionStartTime]);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e', color: 'white' }}>
@@ -176,7 +186,9 @@ function StudentDashboard() {
           onChange={(e) => {
             const q = questions.find(q => q.id === e.target.value);
             setActiveQuestion(q);
-            setCode(q.template || ""); // Reset code when switching
+            setCode(q.template || "");
+            setQuestionStartTime(Date.now());
+            setElapsed(0);
           }}
           value={activeQuestion?.id || ""}
         >
@@ -185,6 +197,7 @@ function StudentDashboard() {
 
         <span>{config.autocomplete ? "🟢 Assisted" : "🔴 Hardcore"}</span>
         <span style={{ marginLeft: '20px', color: '#0f0' }}>⏱️ {formatTime(elapsed)}</span>
+        <button onClick={logout} style={{ marginLeft: '20px', padding: '5px 10px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>Logout</button>
       </div>
 
       {/* 2. MAIN CONTENT AREA (Split 40/60) */}
@@ -259,6 +272,7 @@ const AdminDashboard = ({ api }) => {
   const [autocomplete, setAutocomplete] = useState(true);
   const [highlighting, setHighlighting] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false); // Loading state
+  const [selectedQuestion, setSelectedQuestion] = useState(null);
 
   const formatTime = (elapsed) => {
     if (!elapsed) return "N/A";
@@ -292,7 +306,13 @@ const AdminDashboard = ({ api }) => {
     try { const res = await api.get('/api/leaderboard'); setSubmissions(res.data); } catch(e){}
   };
   const fetchQuestions = async () => {
-    try { const res = await api.get('/api/questions'); setQuestions(res.data); } catch(e){}
+    try {
+      const res = await api.get('/api/questions');
+      setQuestions(res.data);
+      if (res.data.length > 0 && !selectedQuestion) {
+        setSelectedQuestion(res.data[0]);
+      }
+    } catch(e){}
   };
   const fetchSettings = async () => {
     try { const res = await api.get('/api/settings'); setBlindMode(res.data.blind_mode); } catch(e){}
@@ -381,21 +401,38 @@ const AdminDashboard = ({ api }) => {
 
       {/* LEADERBOARD TAB */}
       {tab === 'leaderboard' ? (
-        <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', background: '#252526' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #555' }}><th>User</th><th>Problem</th><th>Status</th><th>Time Taken</th></tr>
-          </thead>
-          <tbody>
-            {submissions.map((sub, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #333' }}>
-                <td style={{ padding: '8px' }}>{sub.username}</td>
-                <td style={{ padding: '8px', color: '#4da6ff' }}>{sub.title || "Unknown"}</td>
-                <td style={{ padding: '8px', color: sub.status === 'Accepted' ? '#0f0' : '#f00' }}>{sub.status}</td>
-                <td style={{ padding: '8px', color: '#aaa' }}>{formatTime(sub.elapsed_time)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ color: 'white', marginRight: '10px' }}>Filter by Question:</label>
+            <select 
+              onChange={(e) => setSelectedQuestion(e.target.value || null)} 
+              value={selectedQuestion || ""}
+              style={{ padding: '5px', background: '#3c3c3c', color: 'white', border: 'none', fontSize: '16px' }}
+            >
+              <option value="">All Questions</option>
+              {questions.map(q => <option key={q.id} value={q.id}>{q.id}: {q.title}</option>)}
+            </select>
+          </div>
+          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', background: '#252526' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #555' }}><th>User</th><th>Problem</th><th>Status</th><th>Time Taken</th></tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const filtered = selectedQuestion ? submissions.filter(s => s.question_id === selectedQuestion) : submissions;
+                const sorted = filtered.sort((a, b) => a.elapsed_time - b.elapsed_time);
+                return sorted.map((sub, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #333' }}>
+                    <td style={{ padding: '8px' }}>{sub.username}</td>
+                    <td style={{ padding: '8px', color: '#4da6ff' }}>{sub.title || "Unknown"}</td>
+                    <td style={{ padding: '8px', color: sub.status === 'Accepted' ? '#0f0' : '#f00' }}>{sub.status}</td>
+                    <td style={{ padding: '8px', color: '#aaa' }}>{formatTime(sub.elapsed_time)}</td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </>
       ) : (
         <div style={{ display: 'flex', gap: '20px' }}>
           {/* LIST QUESTIONS */}
