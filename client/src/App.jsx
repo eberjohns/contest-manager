@@ -18,6 +18,7 @@ function Login() {
       localStorage.setItem('token', res.data.token);
       localStorage.setItem('role', res.data.role);
       localStorage.setItem('username', res.data.username);
+      localStorage.setItem('startTime', Date.now().toString()); // Record start time
 
       if (res.data.role === 'ADMIN') navigate('/admin');
       else navigate('/contest');
@@ -50,6 +51,17 @@ function StudentDashboard() {
 
   const [customInput, setCustomInput] = useState("");
 
+  const [elapsed, setElapsed] = useState(0);
+
+  const [questionStartTime, setQuestionStartTime] = useState(null);
+
+  const formatTime = (elapsed) => {
+    if (!elapsed) return "0:00";
+    const minutes = Math.floor(elapsed / 60000);
+    const seconds = Math.floor((elapsed % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
   const handleRun = async () => {
     setIsRunning(true);
     setOutput("Running...");
@@ -60,7 +72,7 @@ function StudentDashboard() {
         language_id: 71,
         stdin: customInput // <--- PASS THE INPUT HERE
       });
-      setOutput(res.data.output);
+      setOutput(res.data.output + (res.data.error ? '\n' + res.data.error : ''));
     } catch (err) {
       setOutput("Error: " + (err.response?.data?.error || "Server Connection Failed"));
     } finally {
@@ -73,14 +85,17 @@ function StudentDashboard() {
     if (!username) return alert("Please log in again!");
     if (!activeQuestion) return;
 
+    const startTime = localStorage.getItem('startTime');
+    const elapsed = startTime ? Date.now() - parseInt(startTime) : 0;
+
     try {
       await api.post('/api/submit', {
         username: username,
         question_id: activeQuestion.id, // <--- DYNAMIC ID
         code: code,
-        status: 'Completed' // We will make this "Pending" later when we add auto-grading
+        elapsed_time: elapsed
       });
-      alert(`✅ Submitted for ${activeQuestion.title}!`);
+      alert(`✅ Submitted for ${activeQuestion.title} in ${formatTime(elapsed)}!`);
     } catch (err) {
       alert("Submission Failed");
     }
@@ -89,13 +104,12 @@ function StudentDashboard() {
   // Poll for config changes every 5 seconds
   useEffect(() => {
     // Fetch Questions
-    api.get('/api/questions').then(res => {
-      setQuestions(res.data);
-      if (res.data.length > 0) {
-        setActiveQuestion(res.data[0]); // Select the first one by default
-        setCode(res.data[0].template || "# Write your code here"); // Load template
-      }
-    });
+    const fetchQuestions = () => {
+      api.get('/api/questions').then(res => {
+        setQuestions(res.data);
+        // Do not reset activeQuestion or code to avoid overwriting user input
+      }).catch(err => console.error("Questions Poll Error:", err));
+    };
 
     const fetchConfig = () => {
       api.get('/api/config').then(res => {
@@ -109,8 +123,20 @@ function StudentDashboard() {
       }).catch(err => console.error("Config Poll Error:", err));
     };
 
+    // Initial fetch
+    api.get('/api/questions').then(res => {
+      setQuestions(res.data);
+      if (res.data.length > 0) {
+        setActiveQuestion(res.data[0]); // Select the first one by default
+        setCode(res.data[0].template || "# Write your code here"); // Load template
+      }
+    });
+
     fetchConfig(); // Initial check
-    const interval = setInterval(fetchConfig, 5000); // Check every 5s
+    const interval = setInterval(() => {
+      fetchQuestions();
+      fetchConfig();
+    }, 5000); // Check every 5s
 
     return () => clearInterval(interval); // Cleanup on exit
   }, []);
@@ -125,6 +151,17 @@ function StudentDashboard() {
     parameterHints: { enabled: config.autocomplete },
     wordBasedSuggestions: config.autocomplete,
   };
+
+  // Timer effect
+  useEffect(() => {
+    const startTime = localStorage.getItem('startTime');
+    if (startTime) {
+      const interval = setInterval(() => {
+        setElapsed(Date.now() - parseInt(startTime));
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, []);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e', color: 'white' }}>
@@ -147,6 +184,7 @@ function StudentDashboard() {
         </select>
 
         <span>{config.autocomplete ? "🟢 Assisted" : "🔴 Hardcore"}</span>
+        <span style={{ marginLeft: '20px', color: '#0f0' }}>⏱️ {formatTime(elapsed)}</span>
       </div>
 
       {/* 2. MAIN CONTENT AREA (Split 40/60) */}
@@ -213,113 +251,199 @@ function StudentDashboard() {
   );
 }
 
-function AdminDashboard() {
-  const [config, setConfig] = useState({ autocomplete: true, highlighting: true });
-
-  const refreshConfig = () => {
-    api.get('/api/config').then(res => setConfig(res.data));
-  };
-  
+const AdminDashboard = ({ api }) => {
+  const [tab, setTab] = useState('leaderboard');
   const [submissions, setSubmissions] = useState([]);
+  const [questions, setQuestions] = useState([]);
+  const [blindMode, setBlindMode] = useState(false);
+  const [autocomplete, setAutocomplete] = useState(true);
+  const [highlighting, setHighlighting] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false); // Loading state
 
-  const fetchLeaderboard = async () => {
-    try {
-      const res = await api.get('/api/leaderboard');
-      setSubmissions(res.data);
-    } catch (err) { 
-      console.error(err); 
-    }
+  const formatTime = (elapsed) => {
+    if (!elapsed) return "N/A";
+    const minutes = Math.floor(elapsed / 60000);
+    const seconds = Math.floor((elapsed % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
+
+  // Smart Form State
+  const [newQ, setNewQ] = useState({ 
+    title: '', 
+    description: '', 
+    template: '', 
+    solution: '',  // The Golden Code
+    inputs: ['']   // List of inputs
+  });
 
   useEffect(() => {
-    refreshConfig();
-    fetchLeaderboard(); // <--- Add this
-    
-    // Auto-refresh leaderboard every 5 seconds
-    const interval = setInterval(fetchLeaderboard, 5000);
+    refreshData();
+    const interval = setInterval(() => { if(tab==='leaderboard') fetchLeaderboard(); }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [tab]);
 
-  const toggleSetting = async (key) => {
-    const newValue = !config[key];
-    // Optimistic Update (Change UI instantly)
-    setConfig(prev => ({ ...prev, [key]: newValue }));
+  const refreshData = async () => {
+    fetchLeaderboard();
+    fetchQuestions();
+    fetchSettings();
+  };
+
+  const fetchLeaderboard = async () => {
+    try { const res = await api.get('/api/leaderboard'); setSubmissions(res.data); } catch(e){}
+  };
+  const fetchQuestions = async () => {
+    try { const res = await api.get('/api/questions'); setQuestions(res.data); } catch(e){}
+  };
+  const fetchSettings = async () => {
+    try { const res = await api.get('/api/settings'); setBlindMode(res.data.blind_mode); } catch(e){}
+    try { const res = await api.get('/api/config'); setAutocomplete(res.data.autocomplete); setHighlighting(res.data.highlighting); } catch(e){}
+  };
+
+  const toggleBlindMode = async () => {
+    await api.post('/api/settings', { blind_mode: !blindMode });
+    setBlindMode(!blindMode);
+  };
+
+  const toggleAutocomplete = async () => {
+    await api.post('/api/config', { key: 'autocomplete', value: !autocomplete });
+    setAutocomplete(!autocomplete);
+  };
+
+  const toggleHighlighting = async () => {
+    await api.post('/api/config', { key: 'highlighting', value: !highlighting });
+    setHighlighting(!highlighting);
+  };
+
+  const handleDelete = async (id) => {
+    if(!confirm("Delete?")) return;
+    await api.delete(`/api/questions/${id}`);
+    fetchQuestions();
+  };
+
+  // --- SMART INPUT HANDLERS ---
+  const handleAddInput = () => {
+    setNewQ({ ...newQ, inputs: [...newQ.inputs, ''] });
+  };
+
+  const handleInputChange = (index, value) => {
+    const updatedInputs = [...newQ.inputs];
+    updatedInputs[index] = value;
+    setNewQ({ ...newQ, inputs: updatedInputs });
+  };
+
+  const handleSaveSmartQuestion = async () => {
+    if (!newQ.title || !newQ.solution) return alert("Title and Reference Solution are required!");
     
+    setIsProcessing(true);
     try {
-      await api.post('/api/config', { key, value: newValue });
+      await api.post('/api/questions', {
+        title: newQ.title,
+        description: newQ.description,
+        template: newQ.template,
+        solution_code: newQ.solution,
+        test_inputs: newQ.inputs.filter(i => i.trim() !== "") // Remove empty inputs
+      });
+      
+      alert("✅ Question Created & Verified!");
+      // Reset Form
+      setNewQ({ title: '', description: '', template: '', solution: '', inputs: [''] });
+      fetchQuestions();
     } catch (err) {
-      alert("Failed to save setting! Check server logs.");
-      // Revert if failed
-      setConfig(prev => ({ ...prev, [key]: !newValue }));
+      alert("❌ Error: " + (err.response?.data?.error || "Failed to create"));
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   return (
-    <div style={{ padding: '40px', color: 'white' }}>
-      <h1>👑 Admin Command Center</h1>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '30px' }}>
-        
-        {/* Contest Controls Card */}
-        <div style={styles.box}>
-          <h3>⚙️ Difficulty Settings</h3>
-          
-          <div style={localStyles.row}>
-            <span>Autocomplete (IntelliSense)</span>
-            <button 
-              onClick={() => toggleSetting('autocomplete')}
-              style={config.autocomplete ? localStyles.onBtn : localStyles.offBtn}
-            >
-              {config.autocomplete ? "ENABLED" : "DISABLED"}
-            </button>
-          </div>
-
-          <div style={localStyles.row}>
-            <span>Syntax Highlighting</span>
-            <button 
-              onClick={() => toggleSetting('highlighting')}
-              style={config.highlighting ? localStyles.onBtn : localStyles.offBtn}
-            >
-              {config.highlighting ? "ENABLED" : "DISABLED"}
-            </button>
-          </div>
+    <div style={{ padding: '20px', color: 'white', fontFamily: 'sans-serif' }}>
+      {/* HEADER */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <h1>👑 Admin Control</h1>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={toggleBlindMode} style={{ ...styles.btn, background: blindMode ? '#d9534f' : '#333' }}>
+            {blindMode ? "🚫 Blind Mode: ON" : "👁️ Blind Mode: OFF"}
+          </button>
+          <button onClick={toggleAutocomplete} style={{ ...styles.btn, background: autocomplete ? '#28a745' : '#333' }}>
+            {autocomplete ? "🟢 Autocomplete: ON" : "🔴 Autocomplete: OFF"}
+          </button>
+          <button onClick={toggleHighlighting} style={{ ...styles.btn, background: highlighting ? '#28a745' : '#333' }}>
+            {highlighting ? "🟢 Highlighting: ON" : "🔴 Highlighting: OFF"}
+          </button>
         </div>
-
-        {/* Real Leaderboard */}
-        <div style={styles.box}>
-          <h3>🏆 Live Submissions</h3>
-          {submissions.length === 0 ? (
-            <p>No submissions yet...</p>
-          ) : (
-            <table style={{width: '100%', textAlign: 'left', borderCollapse: 'collapse'}}>
-              <thead>
-                <tr style={{borderBottom: '1px solid #555'}}>
-                  <th>User</th>
-                  <th>Problem</th>
-                  <th>Status</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((sub, i) => (
-                  <tr key={i} style={{borderBottom: '1px solid #333'}}>
-                    <td style={{padding: '8px'}}>{sub.username}</td>
-                    <td style={{padding: '8px', color: '#4da6ff'}}>{sub.question_id}</td>
-                    <td style={{padding: '8px', color: '#0f0'}}>{sub.status}</td>
-                    <td style={{padding: '8px', fontSize: '0.8em', color: '#aaa'}}>
-                      {new Date(sub.timestamp).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
       </div>
+
+      {/* TABS */}
+      <div style={{ marginBottom: '20px', borderBottom: '1px solid #444' }}>
+        <button onClick={() => setTab('leaderboard')} style={{ padding: '10px', background: tab==='leaderboard'?'#444':'transparent', color:'white', border:'none' }}>🏆 Leaderboard</button>
+        <button onClick={() => setTab('questions')} style={{ padding: '10px', background: tab==='questions'?'#444':'transparent', color:'white', border:'none' }}>📝 Questions</button>
+      </div>
+
+      {/* LEADERBOARD TAB */}
+      {tab === 'leaderboard' ? (
+        <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', background: '#252526' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #555' }}><th>User</th><th>Problem</th><th>Status</th><th>Time Taken</th></tr>
+          </thead>
+          <tbody>
+            {submissions.map((sub, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #333' }}>
+                <td style={{ padding: '8px' }}>{sub.username}</td>
+                <td style={{ padding: '8px', color: '#4da6ff' }}>{sub.title || "Unknown"}</td>
+                <td style={{ padding: '8px', color: sub.status === 'Accepted' ? '#0f0' : '#f00' }}>{sub.status}</td>
+                <td style={{ padding: '8px', color: '#aaa' }}>{formatTime(sub.elapsed_time)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div style={{ display: 'flex', gap: '20px' }}>
+          {/* LIST QUESTIONS */}
+          <div style={{ flex: 1 }}>
+            <h3>Active Questions</h3>
+            {questions.map(q => (
+              <div key={q.id} style={{ background: '#333', padding: '10px', marginBottom: '5px', display:'flex', justifyContent:'space-between' }}>
+                <span>{q.title}</span>
+                <button onClick={() => handleDelete(q.id)} style={{color:'red', background:'none', border:'none', cursor:'pointer'}}>X</button>
+              </div>
+            ))}
+          </div>
+
+          {/* SMART ADD FORM */}
+          <div style={{ flex: 1.5, background: '#252526', padding: '20px' }}>
+            <h3>✨ Add Smart Question</h3>
+            <input placeholder="Title" value={newQ.title} onChange={e => setNewQ({...newQ, title: e.target.value})} style={styles.input} /><br/><br/>
+            
+            <textarea placeholder="Description" value={newQ.description} onChange={e => setNewQ({...newQ, description: e.target.value})} style={{...styles.input, height: '60px'}} /><br/><br/>
+            
+            <div style={{display:'flex', gap:'10px'}}>
+              <textarea placeholder="Student Template (e.g. print(input()))" value={newQ.template} onChange={e => setNewQ({...newQ, template: e.target.value})} style={{...styles.input, height: '100px', fontFamily:'monospace'}} />
+              <textarea placeholder="✅ Reference Solution (Correct Python Code)" value={newQ.solution} onChange={e => setNewQ({...newQ, solution: e.target.value})} style={{...styles.input, height: '100px', fontFamily:'monospace', border:'1px solid #0f0'}} />
+            </div><br/>
+
+            <h4>Test Inputs (Multiple lines allowed per case)</h4>
+            {newQ.inputs.map((input, idx) => (
+              <div key={idx} style={{marginBottom:'5px'}}>
+                <textarea 
+                  placeholder={`Test Case ${idx+1} Input (e.g. 10\n20)`} 
+                  value={input} 
+                  onChange={(e) => handleInputChange(idx, e.target.value)} 
+                  style={{...styles.input, width: '80%', height: '60px', fontFamily: 'monospace'}} 
+                />
+              </div>
+            ))}
+            <button onClick={handleAddInput} style={{background:'#444', color:'white', border:'none', padding:'5px 10px'}}>+ Add Another Case</button>
+            <br/><br/>
+
+            <button onClick={handleSaveSmartQuestion} disabled={isProcessing} style={{...styles.btn, background: isProcessing ? '#666' : '#28a745', width:'100%'}}>
+              {isProcessing ? "⏳ Verifying & Generating Outputs..." : "💾 Auto-Generate & Save"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+};
 
 const localStyles = {
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', padding: '10px', background: '#333', borderRadius: '5px' },
@@ -334,7 +458,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/contest" element={<StudentDashboard />} />
-        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin" element={<AdminDashboard api={api} />} />
       </Routes>
     </BrowserRouter>
   );
@@ -344,6 +468,6 @@ export default function App() {
 const styles = {
   container: { height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#1e1e1e', color: 'white' },
   box: { background: '#2d2d2d', padding: '40px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
-  input: { display: 'block', width: '100%', padding: '10px', marginBottom: '15px', borderRadius: '5px', border: 'none' },
-  btn: { padding: '10px 25px', background: '#007acc', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }
+  input: { width: '100%', padding: '8px', background: '#333', border: '1px solid #555', color: 'white' },
+  btn: { padding: '10px 20px', border: 'none', color: 'white', cursor: 'pointer', background: '#007bff' }
 };

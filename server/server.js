@@ -43,6 +43,7 @@ db.exec(`
     question_id TEXT,
     status TEXT,     -- 'PASS', 'FAIL', 'ERROR'
     code TEXT,
+    elapsed_time INTEGER, -- Time taken in milliseconds
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -50,13 +51,10 @@ db.exec(`
       id TEXT PRIMARY KEY,
       title TEXT,
       description TEXT,
-      template TEXT
+      template TEXT,
+      test_cases TEXT -- New Column (Stores JSON)
   );
-
-  INSERT OR IGNORE INTO questions (id, title, description, template) VALUES 
-  ('Q1', 'Sum of Two Numbers', 'Write a program that takes two numbers as input and prints their sum.\n\nExample:\nInput: 10 20\nOutput: 30', 'a = int(input())\nb = int(input())\nprint(a + b)'),
-  ('Q2', 'Check Even or Odd', 'Write a program to check if a number is Even or Odd.\n\nExample:\nInput: 4\nOutput: Even', 'n = int(input())\nif n % 2 == 0:\n    print("Even")\nelse:\n    print("Odd")');
-
+  
   CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -64,6 +62,12 @@ db.exec(`
 
   INSERT OR IGNORE INTO config (key, value) VALUES ('autocomplete', 'true');
   INSERT OR IGNORE INTO config (key, value) VALUES ('highlighting', 'true');
+
+  CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+  );
+  INSERT OR IGNORE INTO settings (key, value) VALUES ('blind_mode', 'false');
 `);
 
 console.log("✅ Database initialized successfully.");
@@ -159,44 +163,164 @@ app.post('/api/config', (req, res) => {
     }
 });
 
-// Get all questions
+// Get all questions (for students and admin)
 app.get('/api/questions', (req, res) => {
     try {
-        const rows = db.prepare('SELECT * FROM questions').all();
+        const rows = db.prepare('SELECT id, title, description, template FROM questions').all();
         res.json(rows);
     } catch (err) {
+        console.error("GET Questions Error:", err);
         res.status(500).json({ error: "Failed to fetch questions" });
     }
 });
 
-// --- SUBMISSION & LEADERBOARD API ---
+// Get all questions
+// const { v4: uuidv4 } = require('uuid'); // You might need to install this: npm install uuid
+// OR just use a simple random string generator if you don't want to install uuid
+const generateId = () => 'Q-' + Math.random().toString(36).substr(2, 5).toUpperCase();
 
-// 1. Submit Code (Save to DB)
-app.post('/api/submit', (req, res) => {
-    // In a real contest, you would run test cases here before saving.
-    // For now, we just save whatever they submit.
-    const { username, question_id, code, status } = req.body;
+app.post('/api/questions', async (req, res) => {
+    const { title, description, template, solution_code, test_inputs } = req.body;
     
+    // 1. Generate ID automatically
+    const id = generateId(); 
+    const testCases = [];
+
+    try {
+        // 2. GENERATE OUTPUTS (Run Reference Solution)
+        for (const input of test_inputs) {
+            // Run the "Golden Code" on Judge0
+            const judgeRes = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
+                source_code: solution_code,
+                language_id: 71, // Python
+                stdin: input
+            });
+
+            // If the reference solution fails, stop everything!
+            if (judgeRes.data.status.id !== 3) {
+                return res.status(400).json({ 
+                    error: `Reference solution failed on input: "${input}". Error: ${judgeRes.data.stderr}` 
+                });
+            }
+
+            // Save the generated output
+            testCases.push({
+                input: input,
+                output: judgeRes.data.stdout || "" 
+            });
+        }
+
+        // 3. Save to Database
+        const stmt = db.prepare(`
+            INSERT INTO questions (id, title, description, template, test_cases)
+            VALUES (?, ?, ?, ?, ?)
+        `);
+        stmt.run(id, title, description, template, JSON.stringify(testCases));
+
+        res.json({ success: true, id: id });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to process question." });
+    }
+});
+
+// --- ADMIN: QUESTION MANAGEMENT ---
+
+// Create a new Question
+app.post('/api/questions', (req, res) => {
+    const { id, title, description, template, test_cases } = req.body;
     try {
         const stmt = db.prepare(`
-            INSERT INTO submissions (username, question_id, code, status)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO questions (id, title, description, template, test_cases)
+            VALUES (?, ?, ?, ?, ?)
         `);
-        stmt.run(username, question_id || 'P1', code, status || 'Submitted');
+        // Store test cases as JSON string
+        stmt.run(id, title, description, template, JSON.stringify(test_cases));
         res.json({ success: true });
     } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to create question. ID might be taken." });
+    }
+});
+
+// Delete a Question
+app.delete('/api/questions/:id', (req, res) => {
+    try {
+        db.prepare('DELETE FROM questions WHERE id = ?').run(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to delete" });
+    }
+});
+
+// Get/Update Settings
+app.get('/api/settings', (req, res) => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'blind_mode'").get();
+    res.json({ blind_mode: row ? row.value === 'true' : false });
+});
+
+app.post('/api/settings', (req, res) => {
+    const { blind_mode } = req.body;
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('blind_mode', ?)").run(String(blind_mode));
+    res.json({ success: true });
+});
+
+// --- SUBMISSION & LEADERBOARD API ---
+
+// 1. Submit Code (Auto-Graded)
+app.post('/api/submit', async (req, res) => {
+    const { username, question_id, code, elapsed_time } = req.body;
+    
+    try {
+        // 1. Fetch the Question & Test Cases
+        const question = db.prepare('SELECT test_cases FROM questions WHERE id = ?').get(question_id);
+        if (!question) return res.status(404).json({ error: "Question not found" });
+
+        const testCases = JSON.parse(question.test_cases);
+        let finalStatus = "Accepted"; // Assume success until proven fail
+
+        // 2. Run against ALL test cases
+        for (const test of testCases) {
+            const judgeRes = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
+                source_code: code,
+                language_id: 71, // Python
+                stdin: test.input,
+                expected_output: test.output // <--- The Magic: Judge0 compares this!
+            });
+
+            // Status ID 3 means "Accepted" (Correct Answer)
+            // Any other ID (4=Wrong Answer, 5=Time Limit, 6=Compilation Error) is a fail.
+            if (judgeRes.data.status.id !== 3) {
+                finalStatus = judgeRes.data.status.description; // e.g., "Wrong Answer"
+                break; // Stop testing if one fails
+            }
+        }
+
+        // 3. Save Result to DB
+        const stmt = db.prepare(`
+            INSERT INTO submissions (username, question_id, code, status, elapsed_time)
+            VALUES (?, ?, ?, ?, ?)
+        `);
+        stmt.run(username, question_id, code, finalStatus, elapsed_time);
+
+        res.json({ success: true, status: finalStatus }); 
+
+    } catch (err) {
         console.error("Submit Error:", err);
-        res.status(500).json({ error: "Failed to save submission" });
+        res.status(500).json({ error: "Grading Failed" });
     }
 });
 
 // 2. Get Leaderboard (For Admin)
 app.get('/api/leaderboard', (req, res) => {
     try {
+        // JOIN submissions with questions to get the Title
         const rows = db.prepare(`
-            SELECT username, question_id, status, timestamp 
-            FROM submissions 
-            ORDER BY timestamp DESC
+            SELECT s.username, q.title, s.status, s.elapsed_time, s.timestamp 
+            FROM submissions s
+            LEFT JOIN questions q ON s.question_id = q.id
+            ORDER BY s.timestamp ASC
         `).all();
         res.json(rows);
     } catch (err) {
@@ -211,45 +335,27 @@ const JUDGE0_URL = process.env.JUDGE0_URL || 'http://judge0:2358';
 app.post('/api/run', async (req, res) => {
     try {
         const { code, language_id, stdin } = req.body;
+        const response = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
+            source_code: code,
+            language_id: language_id,
+            stdin: stdin
+        });
 
-        // 1. Prepare Payload for Judge0
-        // Judge0 expects base64 encoded strings
-        const payload = {
-            source_code: Buffer.from(code).toString('base64'),
-            language_id: language_id || 71, // Default to Python (71)
-            stdin: Buffer.from(stdin || "").toString('base64'),
-            base64_encoded: true,
-            wait: true // Wait for result (Block request until done)
-        };
+        // CHECK BLIND MODE
+        const setting = db.prepare("SELECT value FROM settings WHERE key = 'blind_mode'").get();
+        const isBlind = setting ? setting.value === 'true' : false;
 
-        // ... (Axios request code) ...
-        const response = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=true&wait=true`, payload);
-        const result = response.data;
-        
-        // --- IMPROVED LOGIC ---
-        
-        // Decode Output
-        const output = result.stdout ? Buffer.from(result.stdout, 'base64').toString() : null;
-        const error = result.stderr ? Buffer.from(result.stderr, 'base64').toString() : null;
-        const compile_output = result.compile_output ? Buffer.from(result.compile_output, 'base64').toString() : null;
-        
-        // Construct the final message
-        let finalOutput = "";
-        
-        if (output) finalOutput = output;
-        else if (error) finalOutput = "⚠️ Runtime Error:\n" + error;
-        else if (compile_output) finalOutput = "⚠️ Compilation Error:\n" + compile_output;
-        else {
-             // If everything is empty, check the status
-             finalOutput = `⚠️ No Output Received.\nStatus: ${result.status.description}`;
+        let output = response.data.stdout || "";
+        let error = response.data.stderr || response.data.compile_output || "";
+
+        // IF BLIND MODE IS ON & THERE IS AN ERROR -> HIDE IT
+        if (isBlind && error) {
+            error = "🚫 Error Details Hidden (Debugging Mode Active)\nCheck your syntax and logic carefully.";
         }
 
-        // 4. Return to Student
-        res.json({
-            output: output || error || compile_output || "No Output",
-            status: result.status.description,
-            time: result.time,
-            memory: result.memory
+        res.json({ 
+            output: output,
+            error: error
         });
 
     } catch (err) {
