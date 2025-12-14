@@ -37,14 +37,6 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS questions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
-    description TEXT,
-    inputs TEXT,     -- JSON string of inputs
-    expected TEXT    -- JSON string of expected outputs
-  );
-
   CREATE TABLE IF NOT EXISTS submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT,
@@ -53,6 +45,17 @@ db.exec(`
     code TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS questions (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      description TEXT,
+      template TEXT
+  );
+
+  INSERT OR IGNORE INTO questions (id, title, description, template) VALUES 
+  ('Q1', 'Sum of Two Numbers', 'Write a program that takes two numbers as input and prints their sum.\n\nExample:\nInput: 10 20\nOutput: 30', 'a = int(input())\nb = int(input())\nprint(a + b)'),
+  ('Q2', 'Check Even or Odd', 'Write a program to check if a number is Even or Odd.\n\nExample:\nInput: 4\nOutput: Even', 'n = int(input())\nif n % 2 == 0:\n    print("Even")\nelse:\n    print("Odd")');
 
   CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
@@ -153,6 +156,52 @@ app.post('/api/config', (req, res) => {
     } catch (err) {
         console.error("POST Config Error:", err);
         res.status(500).json({ error: "Failed to update config" });
+    }
+});
+
+// Get all questions
+app.get('/api/questions', (req, res) => {
+    try {
+        const rows = db.prepare('SELECT * FROM questions').all();
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch questions" });
+    }
+});
+
+// --- SUBMISSION & LEADERBOARD API ---
+
+// 1. Submit Code (Save to DB)
+app.post('/api/submit', (req, res) => {
+    // In a real contest, you would run test cases here before saving.
+    // For now, we just save whatever they submit.
+    const { username, question_id, code, status } = req.body;
+    
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO submissions (username, question_id, code, status)
+            VALUES (?, ?, ?, ?)
+        `);
+        stmt.run(username, question_id || 'P1', code, status || 'Submitted');
+        res.json({ success: true });
+    } catch (err) {
+        console.error("Submit Error:", err);
+        res.status(500).json({ error: "Failed to save submission" });
+    }
+});
+
+// 2. Get Leaderboard (For Admin)
+app.get('/api/leaderboard', (req, res) => {
+    try {
+        // Get the latest submission for each user
+        const rows = db.prepare(`
+            SELECT username, status, timestamp 
+            FROM submissions 
+            ORDER BY timestamp DESC
+        `).all();
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: "Leaderboard error" });
     }
 });
 

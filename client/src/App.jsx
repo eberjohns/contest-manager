@@ -45,6 +45,9 @@ function StudentDashboard() {
   const [output, setOutput] = useState("");
   const [isRunning, setIsRunning] = useState(false);
 
+  const [questions, setQuestions] = useState([]);
+  const [activeQuestion, setActiveQuestion] = useState(null);
+
   const handleRun = async () => {
     setIsRunning(true);
     setOutput("Running...");
@@ -65,8 +68,35 @@ function StudentDashboard() {
     }
   };
 
+  const handleSubmit = async () => {
+    const username = localStorage.getItem('username');
+    if (!username) return alert("Please log in again!");
+    if (!activeQuestion) return;
+
+    try {
+      await api.post('/api/submit', {
+        username: username,
+        question_id: activeQuestion.id, // <--- DYNAMIC ID
+        code: code,
+        status: 'Completed' // We will make this "Pending" later when we add auto-grading
+      });
+      alert(`✅ Submitted for ${activeQuestion.title}!`);
+    } catch (err) {
+      alert("Submission Failed");
+    }
+  };
+
   // Poll for config changes every 5 seconds
   useEffect(() => {
+    // Fetch Questions
+    api.get('/api/questions').then(res => {
+      setQuestions(res.data);
+      if (res.data.length > 0) {
+        setActiveQuestion(res.data[0]); // Select the first one by default
+        setCode(res.data[0].template || "# Write your code here"); // Load template
+      }
+    });
+
     const fetchConfig = () => {
       api.get('/api/config').then(res => {
         // Only update if changed to avoid editor flickering
@@ -97,42 +127,76 @@ function StudentDashboard() {
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e' }}>
-      {/* Header */}
-      <div style={{ padding: '10px 20px', background: '#2d2d2d', color: 'white', display: 'flex', justifyContent: 'space-between' }}>
-        <h2>📝 Contest Area</h2>
-        <div><span>Mode: {config.autocomplete ? "Assisted" : "Hardcore"}</span></div>
-      </div>
-
-      {/* Editor Area (Takes 70% height) */}
-      <div style={{ flex: 2, borderBottom: '1px solid #333' }}>
-        <Editor
-          height="100%"
-          theme="vs-dark"
-          defaultLanguage="python"
-          language={config.highlighting ? "python" : "plaintext"}
-          value={code}
-          onChange={setCode}
-          options={editorOptions}
-        />
-      </div>
-
-      {/* Output Console (Takes 30% height) */}
-      <div style={{ flex: 1, background: '#111', color: '#0f0', padding: '15px', fontFamily: 'monospace', overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-        <div style={{ color: '#888', marginBottom: '5px' }}>// TERMINAL OUTPUT</div>
-        {output}
-      </div>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e', color: 'white' }}>
       
-      {/* Action Bar */}
-      <div style={{ padding: '10px', background: '#252526', textAlign: 'right' }}>
-         <button 
-           onClick={handleRun} 
-           disabled={isRunning}
-           style={{...styles.btn, opacity: isRunning ? 0.5 : 1}}
-         >
-           {isRunning ? "Running..." : "▶ Run Code"}
-         </button>
-         <button style={{...styles.btn, background: '#28a745', marginLeft: '10px'}}>Submit</button>
+      {/* 1. TOP BAR */}
+      <div style={{ padding: '10px 20px', background: '#252526', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
+        <h2 style={{ margin: 0 }}>🚀 Contest Platform</h2>
+        
+        {/* Problem Selector */}
+        <select 
+          style={{ padding: '5px', background: '#3c3c3c', color: 'white', border: 'none', fontSize: '16px' }}
+          onChange={(e) => {
+            const q = questions.find(q => q.id === e.target.value);
+            setActiveQuestion(q);
+            setCode(q.template || ""); // Reset code when switching
+          }}
+          value={activeQuestion?.id || ""}
+        >
+          {questions.map(q => <option key={q.id} value={q.id}>{q.id}: {q.title}</option>)}
+        </select>
+
+        <span>{config.autocomplete ? "🟢 Assisted" : "🔴 Hardcore"}</span>
+      </div>
+
+      {/* 2. MAIN CONTENT AREA (Split 40/60) */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        
+        {/* LEFT PANEL: Problem Description */}
+        <div style={{ flex: '0 0 40%', padding: '20px', borderRight: '1px solid #333', overflowY: 'auto', background: '#1e1e1e' }}>
+          {activeQuestion ? (
+            <>
+              <h1 style={{ marginTop: 0 }}>{activeQuestion.title}</h1>
+              <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6', color: '#ccc' }}>
+                {activeQuestion.description}
+              </p>
+            </>
+          ) : <p>Loading questions...</p>}
+        </div>
+
+        {/* RIGHT PANEL: Editor & Output */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          
+          {/* Editor */}
+          <div style={{ flex: 2 }}>
+            <Editor
+              height="100%"
+              theme="vs-dark"
+              defaultLanguage="python"
+              language={config.highlighting ? "python" : "plaintext"}
+              value={code}
+              onChange={setCode}
+              options={editorOptions}
+            />
+          </div>
+
+          {/* Terminal / Output */}
+          <div style={{ flex: 1, background: '#111', padding: '15px', fontFamily: 'monospace', overflow: 'auto', borderTop: '1px solid #333' }}>
+            <div style={{ color: '#888', marginBottom: '5px' }}>// TERMINAL</div>
+            <pre style={{ margin: 0, color: '#0f0' }}>{output}</pre>
+          </div>
+
+          {/* Action Bar */}
+          <div style={{ padding: '10px', background: '#252526', textAlign: 'right' }}>
+            <button onClick={handleRun} disabled={isRunning} style={styles.btn}>
+              {isRunning ? "Running..." : "▶ Run"}
+            </button>
+            <button onClick={handleSubmit} style={{...styles.btn, background: '#28a745', marginLeft: '10px'}}>
+              Submit
+            </button>
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -141,13 +205,28 @@ function StudentDashboard() {
 function AdminDashboard() {
   const [config, setConfig] = useState({ autocomplete: true, highlighting: true });
 
-  
   const refreshConfig = () => {
     api.get('/api/config').then(res => setConfig(res.data));
   };
   
+  const [submissions, setSubmissions] = useState([]);
+
+  const fetchLeaderboard = async () => {
+    try {
+      const res = await api.get('/api/leaderboard');
+      setSubmissions(res.data);
+    } catch (err) { 
+      console.error(err); 
+    }
+  };
+
   useEffect(() => {
     refreshConfig();
+    fetchLeaderboard(); // <--- Add this
+    
+    // Auto-refresh leaderboard every 5 seconds
+    const interval = setInterval(fetchLeaderboard, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const toggleSetting = async (key) => {
@@ -195,10 +274,33 @@ function AdminDashboard() {
           </div>
         </div>
 
-        {/* Leaderboard Placeholder */}
+        {/* Real Leaderboard */}
         <div style={styles.box}>
-          <h3>🏆 Live Leaderboard</h3>
-          <p>No submissions yet...</p>
+          <h3>🏆 Live Submissions</h3>
+          {submissions.length === 0 ? (
+            <p>No submissions yet...</p>
+          ) : (
+            <table style={{width: '100%', textAlign: 'left', borderCollapse: 'collapse'}}>
+              <thead>
+                <tr style={{borderBottom: '1px solid #555'}}>
+                  <th>User</th>
+                  <th>Status</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {submissions.map((sub, i) => (
+                  <tr key={i} style={{borderBottom: '1px solid #333'}}>
+                    <td style={{padding: '8px'}}>{sub.username}</td>
+                    <td style={{padding: '8px', color: '#0f0'}}>{sub.status}</td>
+                    <td style={{padding: '8px', fontSize: '0.8em', color: '#aaa'}}>
+                      {new Date(sub.timestamp).toLocaleTimeString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
       </div>
