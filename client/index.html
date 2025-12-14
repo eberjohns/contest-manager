@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contest Login</title>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #222; color: white; }
+        .box { background: #333; padding: 2rem; border-radius: 8px; text-align: center; }
+        input { padding: 10px; margin: 10px 0; width: 80%; display: block; margin-left: auto; margin-right: auto;}
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>Contest Login</h1>
+        <input type="text" id="username" placeholder="Username">
+        <input type="password" id="pin" placeholder="Class PIN">
+        <button onclick="login()">Enter</button>
+        <p id="status"></p>
+    </div>
+
+    <script>
+        async function login() {
+            const username = document.getElementById('username').value;
+            const pin = document.getElementById('pin').value;
+            
+            try {
+                // We talk to the backend on the same URL
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, pin })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    document.getElementById('status').style.color = 'lightgreen';
+                    document.getElementById('status').innerText = "Success! Role: " + data.role;
+                } else {
+                    document.getElementById('status').style.color = 'red';
+                    document.getElementById('status').innerText = "Error: " + data.error;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+    </script>
+</body>
+</html>
