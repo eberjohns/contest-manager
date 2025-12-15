@@ -23,15 +23,20 @@ const SUPPORTED_LANGUAGES = [
 // ==========================================
 const Login = ({ onLogin }) => {
   const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [classPin, setClassPin] = useState('');
 
   const handleLogin = async () => {
     try {
-      const res = await api.post('/api/login', { username, password });
+      const res = await api.post('/api/login', {
+        username,
+        class_pin: classPin
+      });
+
       // Save session info
       localStorage.setItem('username', res.data.username);
       localStorage.setItem('role', res.data.role);
+      localStorage.setItem('session_token', res.data.session_token);
       if (res.data.start_time) localStorage.setItem('start_time', res.data.start_time);
       
       onLogin(res.data);
@@ -50,12 +55,12 @@ const Login = ({ onLogin }) => {
           value={username} 
           onChange={e => setUsername(e.target.value)} 
         />
-        <input 
-          style={styles.input} 
-          type="password" 
-          placeholder="Password (Admin Only)" 
-          value={password} 
-          onChange={e => setPassword(e.target.value)} 
+        <input
+          style={styles.input}
+          placeholder="Class PIN"
+          type="password"
+          value={classPin}
+          onChange={e => setClassPin(e.target.value)}
         />
         {error && <p style={{color: 'red'}}>{error}</p>}
         <button style={styles.btnPrimary} onClick={handleLogin}>Enter Contest</button>
@@ -146,6 +151,13 @@ const AdminDashboard = () => {
     }
   };
 
+  const logout = async () => {
+    const username = localStorage.getItem('username');
+    await api.post('/api/logout', { username });
+    localStorage.clear();
+    onLogout();
+  };
+
   return (
     <div style={styles.dashboard}>
       <header style={styles.header}>
@@ -157,7 +169,8 @@ const AdminDashboard = () => {
           <button onClick={() => toggleSetting('contest_active')} style={{...styles.btn, background: settings.contest_active ? '#28a745' : '#d9534f'}}>
             {settings.contest_active ? "Contest: OPEN" : "Contest: CLOSED"}
           </button>
-          <button onClick={handleReset} style={{...styles.btn, background: 'red'}}>⚠️ Reset</button>
+          <button onClick={handleReset} style={{...styles.btn, background: 'red'}}>Reset</button>
+          <button onClick={logout} style={{...styles.btn, background: 'red'}}>Logout</button>
         </div>
       </header>
 
@@ -373,6 +386,13 @@ const StudentDashboard = ({ user, onLogout }) => {
     } catch (err) { alert("Submission Failed"); }
   };
 
+  const logout = async () => {
+    const username = localStorage.getItem('username');
+    await api.post('/api/logout', { username });
+    localStorage.clear();
+    onLogout();
+  };
+
   return (
     <div style={styles.dashboard}>
       {/* TOP BAR */}
@@ -398,8 +418,10 @@ const StudentDashboard = ({ user, onLogout }) => {
           </select>
         </div>
         <div style={{display:'flex', alignItems:'center', gap:'20px'}}>
+          <span style={{fontSize: '0.95rem', color: '#bbb'}}>👤 {user.username}</span>
           <div style={{fontSize:'1.2em', fontFamily:'monospace'}}>⏱️ {elapsed}</div>
           <button onClick={handleFinishContest} style={{...styles.btn, background:'#d9534f'}}> Finish Contest & Submit</button>
+          <button onClick={logout} style={{...styles.btn, background: '#d9534f'}}>Logout</button>
         </div>
       </header>
 
@@ -452,10 +474,30 @@ const App = () => {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    // Check if logged in
-    const u = localStorage.getItem('username');
-    const r = localStorage.getItem('role');
-    if (u) setUser({ username: u, role: r });
+    const username = localStorage.getItem('username');
+    const token = localStorage.getItem('session_token');
+
+    if (!username || !token) return;
+
+    api.get('/api/session', {
+      headers: {
+        username,
+        session_token: token
+      }
+    })
+    .then(res => {
+      setUser({
+        username: res.data.username,
+        role: res.data.role
+      });
+      if (res.data.start_time) {
+        localStorage.setItem('start_time', res.data.start_time);
+      }
+    })
+    .catch(() => {
+      localStorage.clear();
+      setUser(null);
+    });
   }, []);
 
   const handleLogout = () => {

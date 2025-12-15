@@ -1,5 +1,8 @@
 const crypto = require('crypto');
-const ADMIN_KEY = "ADMIN-" + crypto.randomBytes(4).toString('hex').toUpperCase();
+const CLASS_PIN = Math.floor(1000 + Math.random() * 9000).toString();
+const ADMIN_USERNAME = "ADMIN-" + crypto.randomBytes(4).toString('hex').toUpperCase();
+const generateSession = () => crypto.randomUUID();
+
 const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
@@ -73,62 +76,79 @@ const generateId = () => 'Q-' + Math.random().toString(36).substr(2, 5).toUpperC
 // ==========================================
 
 app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
+    const { username, class_pin } = req.body;
 
-    // 1. ADMIN LOGIN
-    if (username === ADMIN_KEY) {
+    // ---------- ADMIN ----------
+    if (username === ADMIN_USERNAME && class_pin === CLASS_PIN) {
+        const session = generateSession();
+
         return res.json({
-        role: 'admin',
-        username: 'ADMIN'
+            success: true,
+            role: 'admin',
+            username: 'Admin',
+            session_token: session
         });
     }
 
-    // 2. CHECK CONTEST STATUS
-    const activeSetting = db.prepare("SELECT value FROM settings WHERE key='contest_active'").get();
-    if (activeSetting && activeSetting.value === 'false') {
-        return res.status(403).json({ error: "Contest is currently closed." });
+    // ---------- CLASS PIN ----------
+    if (class_pin !== CLASS_PIN) {
+        return res.status(401).json({ error: "Invalid Class PIN" });
     }
 
-    // 3. STUDENT LOGIN / REGISTRATION
-    let user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
+    // ---------- CONTEST STATUS ----------
+    const active = db.prepare(
+        "SELECT value FROM settings WHERE key='contest_active'"
+    ).get();
+
+    if (active?.value === 'false') {
+        return res.status(403).json({ error: "Contest closed" });
+    }
+
+    let user = db.prepare(
+        "SELECT * FROM users WHERE username=?"
+    ).get(username);
+
+    const now = Date.now();
+    const session = generateSession();
 
     if (!user) {
-        // Register new user & Start Timer
-        const now = Date.now();
-        try {
-            db.prepare("INSERT INTO users (username, role, start_time, session_token) VALUES (?, 'student', ?, 'active')")
-              .run(username, now);
-            user = { username, role: 'student', start_time: now, is_finished: 0 };
-        } catch (err) {
-            return res.status(500).json({ error: "Login failed" });
-        }
+        db.prepare(`
+            INSERT INTO users (username, role, start_time, session_token)
+            VALUES (?, 'student', ?, ?)
+        `).run(username, now, session);
     } else {
-        // Check if locked out
         if (user.is_finished) {
-            return res.status(403).json({ error: "You have already submitted your contest." });
+            return res.status(403).json({ error: "Contest already submitted" });
         }
-        // Check session lock (Optional: strictly enforce single device)
-        if (user.session_token === 'active') {
-             // For a robust system, you might block them. 
-             // For this version, we allow re-login which kicks the previous session implicitly by UI state.
-             // return res.status(403).json({ error: "User already logged in!" });
+
+        if (user.session_token) {
+            return res.status(403).json({
+                error: "User already logged in on another device"
+            });
         }
-        
-        // Update session to active
-        db.prepare("UPDATE users SET session_token = 'active' WHERE username = ?").run(username);
+
+        db.prepare(`
+            UPDATE users SET session_token=? WHERE username=?
+        `).run(session, username);
     }
 
-    res.json({ 
-        success: true, 
-        role: 'student', 
-        username: user.username, 
-        start_time: user.start_time 
+    res.json({
+        success: true,
+        role: 'student',
+        username,
+        start_time: user?.start_time || now,
+        session_token: session
     });
 });
 
 app.post('/api/logout', (req, res) => {
     const { username } = req.body;
-    db.prepare("UPDATE users SET session_token = NULL WHERE username = ?").run(username);
+
+    db.prepare(`
+        UPDATE users SET session_token=NULL
+        WHERE username=?
+    `).run(username);
+
     res.json({ success: true });
 });
 
@@ -349,6 +369,29 @@ app.post('/api/finish_contest', async (req, res) => {
     }
 });
 
+app.get('/api/session', (req, res) => {
+    const { username, session_token } = req.headers;
+
+    if (!username || !session_token) {
+        return res.status(401).json({ valid: false });
+    }
+
+    const user = db.prepare(`
+        SELECT * FROM users WHERE username=? AND session_token=?
+    `).get(username, session_token);
+
+    if (!user) {
+        return res.status(401).json({ valid: false });
+    }
+
+    res.json({
+        valid: true,
+        role: user.role,
+        username: user.username,
+        start_time: user.start_time
+    });
+});
+
 // ==========================================
 //              SHARED APIs
 // ==========================================
@@ -399,7 +442,8 @@ app.listen(PORT, () => {
   console.log(`==================================================`);
   console.log(`🚀 Contest Server Started`);
   console.log(`🌐 URL: http://localhost:${PORT}`);
-  console.log(`🔐 ADMIN LOGIN KEY: ${ADMIN_KEY}`);
+  console.log(`🔐 ADMIN LOGIN KEY: ${ADMIN_USERNAME}`);
+  console.log(`🔐 CLASS PIN ACTIVE: ${CLASS_PIN}`);
   console.log(`⚠️  Save this key. It changes every restart.`);
   console.log(`==================================================`);
 });
