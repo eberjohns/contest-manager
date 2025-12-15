@@ -1,502 +1,254 @@
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { api } from './api';
-import Editor from '@monaco-editor/react';
-import { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import Editor from "@monaco-editor/react";
 
-// --- COMPONENTS (We will separate these later) ---
+// --- CONFIGURATION ---
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-function Login() {
+const api = axios.create({ baseURL: API_URL });
+
+// Hardcoded Supported Languages
+const SUPPORTED_LANGUAGES = [
+  { id: 71, name: "Python (3.8.1)" },
+  { id: 50, name: "C (GCC 9.2.0)" },
+  { id: 54, name: "C++ (GCC 9.2.0)" },
+  { id: 62, name: "Java (OpenJDK 13)" },
+  { id: 63, name: "JavaScript (Node.js)" }
+];
+
+// ==========================================
+//           1. LOGIN SCREEN
+// ==========================================
+const Login = ({ onLogin }) => {
   const [username, setUsername] = useState('');
-  const [pin, setPin] = useState('');
-  const navigate = useNavigate();
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
 
   const handleLogin = async () => {
     try {
-      const res = await api.post('/api/login', { username, pin });
-      // Save info
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('role', res.data.role);
+      const res = await api.post('/api/login', { username, password });
+      // Save session info
       localStorage.setItem('username', res.data.username);
-      localStorage.setItem('startTime', Date.now().toString()); // Record start time
-
-      if (res.data.role === 'ADMIN') navigate('/admin');
-      else navigate('/contest');
-    } catch (err) {
-      alert(err.response?.data?.error || "Login Failed");
-    }
-  };
-
-  return (
-    <div style={styles.container}>
-      <div style={styles.box}>
-        <h1>🚀 Contest Login</h1>
-        <input style={styles.input} placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
-        <input style={styles.input} type="password" placeholder="Class PIN" value={pin} onChange={e => setPin(e.target.value)} />
-        <button style={styles.btn} onClick={handleLogin}>ENTER</button>
-      </div>
-    </div>
-  );
-}
-
-function StudentDashboard() {
-  const [code, setCode] = useState("# Write your code here");
-  const [config, setConfig] = useState({ autocomplete: true, highlighting: true });
-
-  const [output, setOutput] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
-
-  const [questions, setQuestions] = useState([]);
-  const [activeQuestion, setActiveQuestion] = useState(null);
-
-  const [customInput, setCustomInput] = useState("");
-
-  const [elapsed, setElapsed] = useState(0);
-
-  const [questionStartTime, setQuestionStartTime] = useState(null);
-
-  const [submitted, setSubmitted] = useState(false);
-
-  const navigate = useNavigate();
-
-  const logout = () => {
-    localStorage.clear();
-    navigate('/');
-  };
-
-  const formatTime = (elapsed) => {
-    if (!elapsed) return "0:00";
-    const minutes = Math.floor(elapsed / 60000);
-    const seconds = Math.floor((elapsed % 60000) / 1000);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
-
-  const handleRun = async () => {
-    setIsRunning(true);
-    setOutput("Running...");
-    
-    try {
-      const res = await api.post('/api/run', {
-        code: code,
-        language_id: 71,
-        stdin: customInput // <--- PASS THE INPUT HERE
-      });
-      setOutput(res.data.output + (res.data.error ? '\n' + res.data.error : ''));
-    } catch (err) {
-      setOutput("Error: " + (err.response?.data?.error || "Server Connection Failed"));
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const handleSubmit = async () => {
-    const username = localStorage.getItem('username');
-    if (!username || !activeQuestion) return;
-
-    if (submitted) {
-      alert("You have already submitted this question.");
-      return;
-    }
-
-    const finalElapsed = Date.now() - questionStartTime; // 🔒 freeze time
-
-    try {
-      await api.post('/api/submit', {
-        username,
-        question_id: activeQuestion.id,
-        code,
-        elapsed_time: finalElapsed
-      });
-
-      alert(`✅ Submitted in ${formatTime(finalElapsed)}!`);
-
-      setSubmitted(true);          // 🔒 lock submit
-      setQuestionStartTime(null);  // ⏱ stop timer
-
-    } catch (err) {
-      if (err.response?.status === 409) {
-        alert("❌ You can submit this question only once.");
-        setSubmitted(true); // sync UI with backend
-      } else {
-        alert("Submission Failed");
-      }
-    }
-  };
-
-  // Poll for config changes every 5 seconds
-  useEffect(() => {
-    // Fetch Questions
-    const fetchQuestions = () => {
-      api.get('/api/questions').then(res => {
-        setQuestions(res.data);
-        // Do not reset activeQuestion or code to avoid overwriting user input
-      }).catch(err => console.error("Questions Poll Error:", err));
-    };
-
-    const fetchConfig = () => {
-      api.get('/api/config').then(res => {
-        // Only update if changed to avoid editor flickering
-        setConfig(prev => {
-          if (JSON.stringify(prev) !== JSON.stringify(res.data)) {
-            return res.data;
-          }
-          return prev;
-        });
-      }).catch(err => console.error("Config Poll Error:", err));
-    };
-
-    // Initial fetch
-    api.get('/api/questions').then(res => {
-      setQuestions(res.data);
-      if (res.data.length > 0) {
-        setActiveQuestion(res.data[0]); // Select the first one by default
-        setCode(res.data[0].template || "# Write your code here"); // Load template
-        setQuestionStartTime(Date.now()); // Start timer for first question
-      }
-    });
-
-    fetchConfig(); // Initial check
-    const interval = setInterval(() => {
-      fetchQuestions();
-      fetchConfig();
-    }, 5000); // Check every 5s
-
-    return () => clearInterval(interval); // Cleanup on exit
-  }, []);
-
-  // Monaco Configuration options
-  const editorOptions = {
-    fontSize: 16,
-    minimap: { enabled: false },
-    // "Hardcore Mode" toggles
-    quickSuggestions: config.autocomplete, 
-    suggestOnTriggerCharacters: config.autocomplete,
-    parameterHints: { enabled: config.autocomplete },
-    wordBasedSuggestions: config.autocomplete,
-  };
-
-  // Timer effect
-  useEffect(() => {
-    if (!questionStartTime) return;
-
-    const interval = setInterval(() => {
-      setElapsed(Date.now() - questionStartTime);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [questionStartTime]);
-
-  return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e', color: 'white' }}>
+      localStorage.setItem('role', res.data.role);
+      if (res.data.start_time) localStorage.setItem('start_time', res.data.start_time);
       
-      {/* 1. TOP BAR */}
-      <div style={{ padding: '10px 20px', background: '#252526', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
-        <h2 style={{ margin: 0 }}>🚀 Contest Platform</h2>
-        
-        {/* Problem Selector */}
-        <select 
-          style={{ padding: '5px', background: '#3c3c3c', color: 'white', border: 'none', fontSize: '16px' }}
-          onChange={(e) => {
-            const q = questions.find(q => q.id === e.target.value);
-            setActiveQuestion(q);
-            setCode(q.template || "");
-            setQuestionStartTime(Date.now());
-            setElapsed(0);
-            setSubmitted(false);
-          }}
-          value={activeQuestion?.id || ""}
-        >
-          {questions.map(q => <option key={q.id} value={q.id}>{q.id}: {q.title}</option>)}
-        </select>
+      onLogin(res.data);
+    } catch (err) {
+      setError(err.response?.data?.error || "Login Failed");
+    }
+  };
 
-        <span>{config.autocomplete ? "🟢 Assisted" : "🔴 Hardcore"}</span>
-        <span style={{ marginLeft: '20px', color: '#0f0' }}>⏱️ {formatTime(elapsed)}</span>
-        <button onClick={logout} style={{ marginLeft: '20px', padding: '5px 10px', background: '#dc3545', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>Logout</button>
-      </div>
-
-      {/* 2. MAIN CONTENT AREA (Split 40/60) */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        
-        {/* LEFT PANEL: Problem Description */}
-        <div style={{ flex: '0 0 40%', padding: '20px', borderRight: '1px solid #333', overflowY: 'auto', background: '#1e1e1e' }}>
-          {activeQuestion ? (
-            <>
-              <h1 style={{ marginTop: 0 }}>{activeQuestion.title}</h1>
-              <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6', color: '#ccc' }}>
-                {activeQuestion.description}
-              </p>
-            </>
-          ) : <p>Loading questions...</p>}
-        </div>
-
-        {/* RIGHT PANEL: Editor & Output */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          
-          {/* Editor (50% height) */}
-          <div style={{ flex: 2 }}>
-            <Editor
-              height="100%"
-              theme="vs-dark"
-              defaultLanguage="python"
-              language={config.highlighting ? "python" : "plaintext"}
-              value={code}
-              onChange={setCode}
-              options={editorOptions}
-            />
-          </div>
-
-          {/* INPUT BOX (New!) */}
-          <div style={{ height: '100px', background: '#1e1e1e', padding: '10px', borderTop: '1px solid #333' }}>
-             <div style={{ color: '#888', marginBottom: '5px', fontSize: '0.8em' }}>STDIN (Input for your code)</div>
-             <textarea 
-                style={{ width: '100%', height: '60px', background: '#252526', color: 'white', border: '1px solid #444', fontFamily: 'monospace' }}
-                value={customInput}
-                onChange={(e) => setCustomInput(e.target.value)}
-                placeholder="Enter input here (e.g. 10 20)"
-             />
-          </div>
-
-          {/* OUTPUT BOX */}
-          <div style={{ flex: 1, background: '#111', padding: '15px', fontFamily: 'monospace', overflow: 'auto', borderTop: '1px solid #333' }}>
-            <div style={{ color: '#888', marginBottom: '5px' }}>// TERMINAL OUTPUT</div>
-            <pre style={{ margin: 0, color: '#0f0' }}>{output}</pre>
-          </div>
-
-          {/* Action Bar */}
-          <div style={{ padding: '10px', background: '#252526', textAlign: 'right' }}>
-            <button onClick={handleRun} disabled={isRunning} style={styles.btn}>
-              {isRunning ? "Running..." : "▶ Run"}
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={submitted}
-              style={{
-                ...styles.btn,
-                background: submitted ? '#555' : '#28a745',
-                marginLeft: '10px',
-                cursor: submitted ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {submitted ? "Submitted" : "Submit"}
-            </button>
-          </div>
-        </div>
-
+  return (
+    <div style={styles.centerBox}>
+      <div style={styles.loginCard}>
+        <h2>🚀 Contest Platform</h2>
+        <input 
+          style={styles.input} 
+          placeholder="Username" 
+          value={username} 
+          onChange={e => setUsername(e.target.value)} 
+        />
+        <input 
+          style={styles.input} 
+          type="password" 
+          placeholder="Password (Admin Only)" 
+          value={password} 
+          onChange={e => setPassword(e.target.value)} 
+        />
+        {error && <p style={{color: 'red'}}>{error}</p>}
+        <button style={styles.btnPrimary} onClick={handleLogin}>Enter Contest</button>
       </div>
     </div>
   );
-}
+};
 
-const AdminDashboard = ({ api }) => {
+// ==========================================
+//           2. ADMIN DASHBOARD
+// ==========================================
+const AdminDashboard = () => {
   const [tab, setTab] = useState('leaderboard');
   const [submissions, setSubmissions] = useState([]);
   const [questions, setQuestions] = useState([]);
-  const [blindMode, setBlindMode] = useState(false);
-  const [autocomplete, setAutocomplete] = useState(true);
-  const [highlighting, setHighlighting] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false); // Loading state
-  const [selectedQuestion, setSelectedQuestion] = useState(null);
+  const [settings, setSettings] = useState({ blind_mode: false, contest_active: true });
+  const [loading, setLoading] = useState(false);
 
-  const formatTime = (elapsed) => {
-    if (!elapsed) return "N/A";
-    const minutes = Math.floor(elapsed / 60000);
-    const seconds = Math.floor((elapsed % 60000) / 1000);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
-
-  // Smart Form State
+  // New Question Form State
   const [newQ, setNewQ] = useState({ 
-    title: '', 
-    description: '', 
-    template: '', 
-    solution: '',  // The Golden Code
-    inputs: ['']   // List of inputs
+    title: '', description: '', solution: '', inputs: [''], templates: {} 
   });
 
   useEffect(() => {
-    refreshData();
-    const interval = setInterval(() => { if(tab==='leaderboard') fetchLeaderboard(); }, 5000);
+    fetchData();
+    const interval = setInterval(fetchLeaderboard, 5000);
     return () => clearInterval(interval);
-  }, [tab]);
+  }, []);
 
-  const refreshData = async () => {
-    fetchLeaderboard();
-    fetchQuestions();
-    fetchSettings();
-  };
+  const fetchData = () => { fetchLeaderboard(); fetchQuestions(); fetchSettings(); };
 
   const fetchLeaderboard = async () => {
     try { const res = await api.get('/api/leaderboard'); setSubmissions(res.data); } catch(e){}
   };
   const fetchQuestions = async () => {
-    try {
-      const res = await api.get('/api/questions');
-      setQuestions(res.data);
-      if (res.data.length > 0 && !selectedQuestion) {
-        setSelectedQuestion(res.data[0]);
-      }
-    } catch(e){}
+    try { const res = await api.get('/api/questions'); setQuestions(res.data); } catch(e){}
   };
   const fetchSettings = async () => {
-    try { const res = await api.get('/api/settings'); setBlindMode(res.data.blind_mode); } catch(e){}
-    try { const res = await api.get('/api/config'); setAutocomplete(res.data.autocomplete); setHighlighting(res.data.highlighting); } catch(e){}
+    try { const res = await api.get('/api/settings'); setSettings(res.data); } catch(e){}
   };
 
-  const toggleBlindMode = async () => {
-    await api.post('/api/settings', { blind_mode: !blindMode });
-    setBlindMode(!blindMode);
+  // --- ACTIONS ---
+  const toggleSetting = async (key) => {
+    const newVal = !settings[key];
+    await api.post('/api/settings', { [key]: newVal });
+    setSettings({...settings, [key]: newVal});
   };
 
-  const toggleAutocomplete = async () => {
-    await api.post('/api/config', { key: 'autocomplete', value: !autocomplete });
-    setAutocomplete(!autocomplete);
+  const handleReset = async () => {
+    if(!confirm("⚠️ DANGER: This will delete ALL users, drafts, and results. Are you sure?")) return;
+    await api.post('/api/admin/reset');
+    alert("Contest Reset Successfully.");
+    fetchData();
   };
 
-  const toggleHighlighting = async () => {
-    await api.post('/api/config', { key: 'highlighting', value: !highlighting });
-    setHighlighting(!highlighting);
+  // --- QUESTION MANAGEMENT ---
+  const toggleLanguage = (langId) => {
+    const updated = { ...newQ.templates };
+    if (updated[langId] !== undefined) delete updated[langId];
+    else updated[langId] = ""; // Init with empty string for Admin to fill
+    setNewQ({ ...newQ, templates: updated });
   };
 
-  const handleDelete = async (id) => {
-    if(!confirm("Delete?")) return;
-    await api.delete(`/api/questions/${id}`);
-    fetchQuestions();
+  const handleTemplateChange = (langId, code) => {
+    setNewQ({ ...newQ, templates: { ...newQ.templates, [langId]: code } });
   };
 
-  // --- SMART INPUT HANDLERS ---
-  const handleAddInput = () => {
-    setNewQ({ ...newQ, inputs: [...newQ.inputs, ''] });
-  };
+  const handleSaveQuestion = async () => {
+    if (!newQ.title || !newQ.solution) return alert("Title and Golden Solution are required!");
+    if (Object.keys(newQ.templates).length === 0) return alert("Select at least one language!");
 
-  const handleInputChange = (index, value) => {
-    const updatedInputs = [...newQ.inputs];
-    updatedInputs[index] = value;
-    setNewQ({ ...newQ, inputs: updatedInputs });
-  };
-
-  const handleSaveSmartQuestion = async () => {
-    if (!newQ.title || !newQ.solution) return alert("Title and Reference Solution are required!");
-    
-    setIsProcessing(true);
+    setLoading(true);
     try {
       await api.post('/api/questions', {
         title: newQ.title,
         description: newQ.description,
-        template: newQ.template,
         solution_code: newQ.solution,
-        test_inputs: newQ.inputs.filter(i => i.trim() !== "") // Remove empty inputs
+        test_inputs: newQ.inputs.filter(i => i.trim() !== ""),
+        templates: newQ.templates
       });
-      
       alert("✅ Question Created & Verified!");
-      // Reset Form
-      setNewQ({ title: '', description: '', template: '', solution: '', inputs: [''] });
+      setNewQ({ title: '', description: '', solution: '', inputs: [''], templates: {} });
       fetchQuestions();
     } catch (err) {
-      alert("❌ Error: " + (err.response?.data?.error || "Failed to create"));
+      alert("Error: " + (err.response?.data?.error || err.message));
     } finally {
-      setIsProcessing(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ padding: '20px', color: 'white', fontFamily: 'sans-serif' }}>
-      {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <h1>👑 Admin Control</h1>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={toggleBlindMode} style={{ ...styles.btn, background: blindMode ? '#d9534f' : '#333' }}>
-            {blindMode ? "🚫 Blind Mode: ON" : "👁️ Blind Mode: OFF"}
+    <div style={styles.dashboard}>
+      <header style={styles.header}>
+        <h1>👑 Admin Console</h1>
+        <div style={{display:'flex', gap:'10px'}}>
+          <button onClick={() => toggleSetting('blind_mode')} style={{...styles.btn, background: settings.blind_mode ? '#d9534f' : '#333'}}>
+            {settings.blind_mode ? "Blind Mode: ON" : "Blind Mode: OFF"}
           </button>
-          <button onClick={toggleAutocomplete} style={{ ...styles.btn, background: autocomplete ? '#28a745' : '#333' }}>
-            {autocomplete ? "🟢 Autocomplete: ON" : "🔴 Autocomplete: OFF"}
+          <button onClick={() => toggleSetting('contest_active')} style={{...styles.btn, background: settings.contest_active ? '#28a745' : '#d9534f'}}>
+            {settings.contest_active ? "Contest: OPEN" : "Contest: CLOSED"}
           </button>
-          <button onClick={toggleHighlighting} style={{ ...styles.btn, background: highlighting ? '#28a745' : '#333' }}>
-            {highlighting ? "🟢 Highlighting: ON" : "🔴 Highlighting: OFF"}
-          </button>
+          <button onClick={handleReset} style={{...styles.btn, background: 'red'}}>⚠️ Reset</button>
         </div>
+      </header>
+
+      <div style={styles.tabs}>
+        <button onClick={() => setTab('leaderboard')} style={tab==='leaderboard'?styles.activeTab:styles.tab}>🏆 Leaderboard</button>
+        <button onClick={() => setTab('questions')} style={tab==='questions'?styles.activeTab:styles.tab}>📝 Manage Questions</button>
       </div>
 
-      {/* TABS */}
-      <div style={{ marginBottom: '20px', borderBottom: '1px solid #444' }}>
-        <button onClick={() => setTab('leaderboard')} style={{ padding: '10px', background: tab==='leaderboard'?'#444':'transparent', color:'white', border:'none' }}>🏆 Leaderboard</button>
-        <button onClick={() => setTab('questions')} style={{ padding: '10px', background: tab==='questions'?'#444':'transparent', color:'white', border:'none' }}>📝 Questions</button>
-      </div>
-
-      {/* LEADERBOARD TAB */}
       {tab === 'leaderboard' ? (
-        <>
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{ color: 'white', marginRight: '10px' }}>Filter by Question:</label>
-            <select 
-              onChange={(e) => setSelectedQuestion(e.target.value || null)} 
-              value={selectedQuestion || ""}
-              style={{ padding: '5px', background: '#3c3c3c', color: 'white', border: 'none', fontSize: '16px' }}
-            >
-              <option value="">All Questions</option>
-              {questions.map(q => <option key={q.id} value={q.id}>{q.id}: {q.title}</option>)}
-            </select>
-          </div>
-          <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', background: '#252526' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #555' }}><th>User</th><th>Problem</th><th>Status</th><th>Time Taken</th></tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const filtered = selectedQuestion ? submissions.filter(s => s.question_id === selectedQuestion) : submissions;
-                const sorted = filtered.sort((a, b) => a.elapsed_time - b.elapsed_time);
-                return sorted.map((sub, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid #333' }}>
-                    <td style={{ padding: '8px' }}>{sub.username}</td>
-                    <td style={{ padding: '8px', color: '#4da6ff' }}>{sub.title || "Unknown"}</td>
-                    <td style={{ padding: '8px', color: sub.status === 'Accepted' ? '#0f0' : '#f00' }}>{sub.status}</td>
-                    <td style={{ padding: '8px', color: '#aaa' }}>{formatTime(sub.elapsed_time)}</td>
-                  </tr>
-                ));
-              })()}
-            </tbody>
-          </table>
-        </>
+        <table style={styles.table}>
+          <thead>
+            <tr><th>Rank</th><th>User</th><th>Solved</th><th>Time</th></tr>
+          </thead>
+          <tbody>
+            {submissions.map((sub, i) => (
+              <tr key={i}>
+                <td>#{i+1}</td>
+                <td>{sub.username}</td>
+                <td style={{color:'#0f0'}}>{sub.solved} / {questions.length}</td>
+                <td>{sub.timeStr}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       ) : (
-        <div style={{ display: 'flex', gap: '20px' }}>
-          {/* LIST QUESTIONS */}
-          <div style={{ flex: 1 }}>
-            <h3>Active Questions</h3>
+        <div style={styles.splitView}>
+          <div style={{flex:1, overflowY:'auto'}}>
+            <h3>Existing Questions</h3>
             {questions.map(q => (
-              <div key={q.id} style={{ background: '#333', padding: '10px', marginBottom: '5px', display:'flex', justifyContent:'space-between' }}>
-                <span>{q.title}</span>
-                <button onClick={() => handleDelete(q.id)} style={{color:'red', background:'none', border:'none', cursor:'pointer'}}>X</button>
+              <div key={q.id} style={styles.card}>
+                <div style={{fontWeight:'bold'}}>{q.title}</div>
+                <button onClick={async () => { if(confirm("Delete?")) { await api.delete(`/api/questions/${q.id}`); fetchQuestions(); }}} style={{color:'red', background:'none', border:'none'}}>Delete</button>
               </div>
             ))}
           </div>
 
-          {/* SMART ADD FORM */}
-          <div style={{ flex: 1.5, background: '#252526', padding: '20px' }}>
-            <h3>✨ Add Smart Question</h3>
-            <input placeholder="Title" value={newQ.title} onChange={e => setNewQ({...newQ, title: e.target.value})} style={styles.input} /><br/><br/>
+          <div style={{flex:2, background:'#252526', padding:'20px', borderRadius:'8px'}}>
+            <h3>Add Smart Question</h3>
+            <input placeholder="Title" value={newQ.title} onChange={e=>setNewQ({...newQ, title:e.target.value})} style={styles.input} />
+            <textarea placeholder="Description" value={newQ.description} onChange={e=>setNewQ({...newQ, description:e.target.value})} style={{...styles.input, height:'60px'}} />
             
-            <textarea placeholder="Description" value={newQ.description} onChange={e => setNewQ({...newQ, description: e.target.value})} style={{...styles.input, height: '60px'}} /><br/><br/>
-            
-            <div style={{display:'flex', gap:'10px'}}>
-              <textarea placeholder="Student Template (e.g. print(input()))" value={newQ.template} onChange={e => setNewQ({...newQ, template: e.target.value})} style={{...styles.input, height: '100px', fontFamily:'monospace'}} />
-              <textarea placeholder="✅ Reference Solution (Correct Python Code)" value={newQ.solution} onChange={e => setNewQ({...newQ, solution: e.target.value})} style={{...styles.input, height: '100px', fontFamily:'monospace', border:'1px solid #0f0'}} />
-            </div><br/>
+            <div style={{marginTop:'10px'}}>
+              <label>Golden Solution (Python 3):</label>
+              <textarea 
+                placeholder="def solve(): ..." 
+                value={newQ.solution} 
+                onChange={e=>setNewQ({...newQ, solution:e.target.value})} 
+                style={{...styles.codeMsg, height:'100px', border:'1px solid #28a745'}} 
+              />
+            </div>
 
-            <h4>Test Inputs (Multiple lines allowed per case)</h4>
-            {newQ.inputs.map((input, idx) => (
-              <div key={idx} style={{marginBottom:'5px'}}>
-                <textarea 
-                  placeholder={`Test Case ${idx+1} Input (e.g. 10\n20)`} 
-                  value={input} 
-                  onChange={(e) => handleInputChange(idx, e.target.value)} 
-                  style={{...styles.input, width: '80%', height: '60px', fontFamily: 'monospace'}} 
-                />
+            <div style={{marginTop:'10px'}}>
+              <label>Test Inputs (for generating outputs):</label>
+              {newQ.inputs.map((inp, i) => (
+                <div key={i} style={{marginBottom:'5px'}}>
+                  <input value={inp} onChange={e=>{
+                    const up = [...newQ.inputs]; up[i]=e.target.value; setNewQ({...newQ, inputs:up});
+                  }} style={styles.input} placeholder={`Input Case ${i+1}`} />
+                </div>
+              ))}
+              <button onClick={()=>setNewQ({...newQ, inputs:[...newQ.inputs, '']})} style={styles.btnSmall}>+ Add Case</button>
+            </div>
+
+            <div style={{marginTop:'20px'}}>
+              <label>Allowed Languages & Templates:</label>
+              <div style={{display:'flex', gap:'5px', flexWrap:'wrap', margin:'5px 0'}}>
+                {SUPPORTED_LANGUAGES.map(lang => {
+                  const isSel = newQ.templates[lang.id] !== undefined;
+                  return (
+                    <button key={lang.id} onClick={()=>toggleLanguage(lang.id)} 
+                      style={{...styles.btnSmall, background: isSel ? '#28a745' : '#444'}}>
+                      {isSel ? "✅ " : "+ "}{lang.name}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
-            <button onClick={handleAddInput} style={{background:'#444', color:'white', border:'none', padding:'5px 10px'}}>+ Add Another Case</button>
-            <br/><br/>
+              {Object.keys(newQ.templates).map(langId => {
+                 const lang = SUPPORTED_LANGUAGES.find(l=>l.id==langId);
+                 return (
+                   <div key={langId} style={{marginTop:'5px'}}>
+                     <small style={{color:'#aaa'}}>Template for {lang.name}</small>
+                     <textarea 
+                       value={newQ.templates[langId]} 
+                       onChange={e=>handleTemplateChange(langId, e.target.value)}
+                       style={{...styles.codeMsg, height:'60px'}} 
+                     />
+                   </div>
+                 )
+              })}
+            </div>
 
-            <button onClick={handleSaveSmartQuestion} disabled={isProcessing} style={{...styles.btn, background: isProcessing ? '#666' : '#28a745', width:'100%'}}>
-              {isProcessing ? "⏳ Verifying & Generating Outputs..." : "💾 Auto-Generate & Save"}
+            <button onClick={handleSaveQuestion} disabled={loading} style={{...styles.btnPrimary, marginTop:'20px', width:'100%'}}>
+              {loading ? "⏳ Validating..." : "💾 Auto-Verify & Save"}
             </button>
           </div>
         </div>
@@ -505,29 +257,223 @@ const AdminDashboard = ({ api }) => {
   );
 };
 
-const localStyles = {
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', padding: '10px', background: '#333', borderRadius: '5px' },
-  onBtn: { padding: '5px 15px', background: '#28a745', border: 'none', color: 'white', borderRadius: '4px', cursor: 'pointer' },
-  offBtn: { padding: '5px 15px', background: '#dc3545', border: 'none', color: 'white', borderRadius: '4px', cursor: 'pointer' }
-};
+// ==========================================
+//           3. STUDENT DASHBOARD
+// ==========================================
+const StudentDashboard = ({ user, onLogout }) => {
+  const [questions, setQuestions] = useState([]);
+  const [activeQ, setActiveQ] = useState(null);
+  const [drafts, setDrafts] = useState({}); // { qId: { code, langId } }
+  
+  // Editor State
+  const [code, setCode] = useState("");
+  const [language, setLanguage] = useState(71);
+  const [customInput, setCustomInput] = useState("");
+  const [output, setOutput] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
 
-// --- MAIN APP ---
-export default function App() {
+  // Timer State
+  const [elapsed, setElapsed] = useState("00:00:00");
+
+  useEffect(() => {
+    // 1. Load Questions
+    api.get('/api/questions').then(res => {
+      setQuestions(res.data);
+      if (res.data.length > 0) setActiveQ(res.data[0]);
+    });
+
+    // 2. Load Drafts
+    api.get(`/api/drafts/${user.username}`).then(res => {
+      const draftMap = {};
+      res.data.forEach(d => { draftMap[d.question_id] = { code: d.code, langId: d.language_id } });
+      setDrafts(draftMap);
+    });
+
+    // 3. Start Timer
+    const timer = setInterval(() => {
+      const start = parseInt(localStorage.getItem('start_time') || Date.now());
+      const diff = Date.now() - start;
+      const date = new Date(diff);
+      setElapsed(date.toISOString().substr(11, 8));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [user.username]);
+
+  // Handle Question/Draft Switching
+  useEffect(() => {
+    if (!activeQ) return;
+    
+    // Check if we have a draft
+    const draft = drafts[activeQ.id];
+    
+    if (draft) {
+      // Load Draft
+      setCode(draft.code);
+      setLanguage(draft.langId);
+    } else {
+      // Load Template
+      const templates = JSON.parse(activeQ.templates || '{}');
+      const allowedLangs = Object.keys(templates).map(Number);
+      
+      // Default to Python (71) if allowed, else first allowed
+      let targetLang = allowedLangs.includes(71) ? 71 : allowedLangs[0];
+      setLanguage(targetLang);
+      setCode(templates[targetLang] || "");
+    }
+    setOutput(""); // Clear terminal
+  }, [activeQ]);
+
+  // Save Draft Logic
+  const handleSave = async (newCode) => {
+    setCode(newCode);
+    // Update Local Draft State
+    const updatedDrafts = { ...drafts, [activeQ.id]: { code: newCode, langId: language } };
+    setDrafts(updatedDrafts);
+    
+    // Send to Server (Debounce this in real app)
+    await api.post('/api/save_draft', {
+      username: user.username,
+      question_id: activeQ.id,
+      code: newCode,
+      language_id: language
+    });
+  };
+
+  const handleRun = async () => {
+    setIsRunning(true);
+    setOutput("Running...");
+    try {
+      const res = await api.post('/api/run', { code, language_id: language, stdin: customInput });
+      setOutput(res.data.output || res.data.error);
+    } catch (err) { setOutput("Execution Failed"); }
+    setIsRunning(false);
+  };
+
+  const handleFinishContest = async () => {
+    if (!confirm("⚠️ Are you sure? This will submit ALL questions and end your contest.")) return;
+    try {
+      await api.post('/api/finish_contest', { username: user.username });
+      alert("🎉 Contest Submitted! Thank you.");
+      onLogout(); // Or redirect to a summary page
+    } catch (err) { alert("Submission Failed"); }
+  };
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/contest" element={<StudentDashboard />} />
-        <Route path="/admin" element={<AdminDashboard api={api} />} />
-      </Routes>
-    </BrowserRouter>
-  );
-}
+    <div style={styles.dashboard}>
+      {/* TOP BAR */}
+      <header style={styles.header}>
+        <div style={{display:'flex', alignItems:'center', gap:'15px'}}>
+          <h3>🚀 Contest</h3>
+          <select value={activeQ?.id || ""} onChange={e => setActiveQ(questions.find(q => q.id === e.target.value))} style={styles.select}>
+            {questions.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
+          </select>
+          <select value={language} onChange={e => {
+             const newLang = Number(e.target.value);
+             setLanguage(newLang);
+             const tmpls = JSON.parse(activeQ.templates);
+             // If switching lang, load its template (warning: overwrites code)
+             if(confirm("Switching language will reset code. Proceed?")) setCode(tmpls[newLang] || "");
+          }} style={styles.select}>
+            {activeQ && JSON.parse(activeQ.templates || '{}') ? (
+              Object.keys(JSON.parse(activeQ.templates)).map(id => {
+                const l = SUPPORTED_LANGUAGES.find(x => x.id == id);
+                return <option key={id} value={id}>{l ? l.name : id}</option>
+              })
+            ) : <option>Loading...</option>}
+          </select>
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:'20px'}}>
+          <div style={{fontSize:'1.2em', fontFamily:'monospace'}}>⏱️ {elapsed}</div>
+          <button onClick={handleFinishContest} style={{...styles.btn, background:'#d9534f'}}>🏁 Finish Contest</button>
+        </div>
+      </header>
 
-// --- BASIC STYLES ---
-const styles = {
-  container: { height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#1e1e1e', color: 'white' },
-  box: { background: '#2d2d2d', padding: '40px', borderRadius: '10px', textAlign: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
-  input: { width: '100%', padding: '8px', background: '#333', border: '1px solid #555', color: 'white' },
-  btn: { padding: '10px 20px', border: 'none', color: 'white', cursor: 'pointer', background: '#007bff' }
+      {/* MAIN CONTENT */}
+      <div style={styles.splitView}>
+        {/* LEFT: Problem */}
+        <div style={{flex: 1, padding:'20px', overflowY:'auto', borderRight:'1px solid #333'}}>
+          {activeQ ? (
+             <>
+               <h1>{activeQ.title}</h1>
+               <p style={{whiteSpace:'pre-wrap', lineHeight:'1.5'}}>{activeQ.description}</p>
+             </>
+          ) : <p>Loading...</p>}
+        </div>
+
+        {/* RIGHT: Editor */}
+        <div style={{flex: 1.5, display:'flex', flexDirection:'column'}}>
+          <div style={{flex: 1}}>
+             <Editor 
+               height="100%" 
+               theme="vs-dark" 
+               language={language === 71 ? "python" : "cpp"} // simplified mapping
+               value={code} 
+               onChange={handleSave}
+             />
+          </div>
+          <div style={{height:'150px', background:'#1e1e1e', borderTop:'1px solid #333', display:'flex', flexDirection:'column'}}>
+             <div style={{display:'flex', borderBottom:'1px solid #333'}}>
+                <div style={{flex:1, padding:'5px', color:'#aaa'}}>Test Input</div>
+                <div style={{flex:1, padding:'5px', color:'#aaa'}}>Output</div>
+             </div>
+             <div style={{flex:1, display:'flex'}}>
+                <textarea value={customInput} onChange={e=>setCustomInput(e.target.value)} style={{...styles.terminal, borderRight:'1px solid #333'}} />
+                <pre style={{...styles.terminal, color: output.includes('Error') ? 'red' : '#0f0'}}>{output}</pre>
+             </div>
+             <div style={{padding:'5px', textAlign:'right'}}>
+               <button onClick={handleRun} disabled={isRunning} style={styles.btnPrimary}>{isRunning ? "Running..." : "▶ Run Code"}</button>
+             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
+
+// ==========================================
+//           4. MAIN APP ROUTER
+// ==========================================
+const App = () => {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    // Check if logged in
+    const u = localStorage.getItem('username');
+    const r = localStorage.getItem('role');
+    if (u) setUser({ username: u, role: r });
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.clear();
+    setUser(null);
+  };
+
+  if (!user) return <Login onLogin={setUser} />;
+  return user.role === 'admin' ? <AdminDashboard /> : <StudentDashboard user={user} onLogout={handleLogout} />;
+};
+
+// ==========================================
+//           STYLES
+// ==========================================
+const styles = {
+  centerBox: { height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#1e1e1e', color:'white' },
+  loginCard: { padding: '40px', background: '#252526', borderRadius: '10px', textAlign: 'center', width: '300px' },
+  dashboard: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e', color: 'white' },
+  header: { padding: '10px 20px', background: '#252526', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  splitView: { flex: 1, display: 'flex', overflow: 'hidden' },
+  input: { width: '100%', padding: '10px', marginBottom: '10px', background: '#333', border: '1px solid #555', color: 'white', borderRadius: '4px' },
+  select: { padding: '8px', background: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px' },
+  btn: { padding: '8px 15px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'white' },
+  btnPrimary: { padding: '10px 20px', cursor: 'pointer', border: 'none', borderRadius: '4px', background: '#007bff', color: 'white', fontWeight: 'bold' },
+  btnSmall: { padding: '5px 10px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'white', fontSize: '0.8em' },
+  table: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+  tabs: { display: 'flex', borderBottom: '1px solid #444' },
+  tab: { padding: '15px 30px', background: 'transparent', color: '#aaa', border: 'none', cursor: 'pointer' },
+  activeTab: { padding: '15px 30px', background: '#252526', color: 'white', border: 'none', cursor: 'pointer', borderBottom: '2px solid #007bff' },
+  card: { padding: '15px', background: '#333', borderRadius: '5px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' },
+  codeMsg: { width: '100%', background: '#111', color: '#0f0', border: '1px solid #333', padding: '10px', fontFamily: 'monospace' },
+  terminal: { flex:1, background: 'transparent', color: 'white', border: 'none', resize: 'none', padding: '10px', fontFamily: 'monospace' }
+};
+
+export default App;

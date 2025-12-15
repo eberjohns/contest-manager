@@ -1,227 +1,181 @@
-// server/server.js
-const axios = require('axios');
+const crypto = require('crypto');
+const ADMIN_KEY = "ADMIN-" + crypto.randomBytes(4).toString('hex').toUpperCase();
 const express = require('express');
 const cors = require('cors');
 const Database = require('better-sqlite3');
-const crypto = require('crypto');
-const fs = require('fs');
+const axios = require('axios');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JUDGE0_URL = process.env.JUDGE0_URL || 'http://judge0-server:2358';
 
-// --- 1. CONFIG & SECURITY ---
-const CLASS_PIN = process.env.CLASS_PIN || "1234"; // Default if not provided
-const ADMIN_TOKEN = "ADMIN-" + crypto.randomBytes(4).toString('hex').toUpperCase();
-
-// Enable CORS so frontend can talk to backend
 app.use(cors());
 app.use(express.json());
 
-// --- 2. DATABASE SETUP (SQLite) ---
-// Ensure data directory exists
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)){
-    fs.mkdirSync(dataDir);
-}
+// --- DATABASE SETUP ---
+const db = new Database('./data/contest.db');
 
-// Connect to DB (It creates the file 'contest.db' if missing)
-const db = new Database(path.join(dataDir, 'contest.db'));
-
-// Initialize Tables
 db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    username TEXT PRIMARY KEY,
-    role TEXT,
-    token TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+    -- 1. USERS (Stores Timer & Lock Status)
+    CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        role TEXT DEFAULT 'student', -- 'admin' or 'student'
+        start_time INTEGER,          -- Timestamp when they FIRST logged in
+        end_time INTEGER,            -- Timestamp when they clicked "Finish Contest"
+        is_finished BOOLEAN DEFAULT 0, -- 1 if they submitted everything
+        session_token TEXT           -- 'active' means logged in
+    );
 
-  CREATE TABLE IF NOT EXISTS submissions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
-    question_id TEXT NOT NULL,
-    status TEXT,     -- 'PASS', 'FAIL', 'ERROR'
-    code TEXT,
-    elapsed_time INTEGER, -- Time taken in milliseconds
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+    -- 2. QUESTIONS (Stores Templates & Hidden Test Cases)
+    CREATE TABLE IF NOT EXISTS questions (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        description TEXT,
+        templates TEXT,        -- JSON: {"71": "python_code", "54": "cpp_code"}
+        test_cases TEXT        -- JSON: [{input, output}, {input, output}]
+    );
 
-  CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_question
-  ON submissions(username, question_id);
+    -- 3. DRAFTS (Saves student work in progress)
+    CREATE TABLE IF NOT EXISTS drafts (
+        username TEXT,
+        question_id TEXT,
+        code TEXT,
+        language_id INTEGER,
+        PRIMARY KEY (username, question_id)
+    );
 
-  CREATE TABLE IF NOT EXISTS questions (
-      id TEXT PRIMARY KEY,
-      title TEXT,
-      description TEXT,
-      template TEXT,
-      test_cases TEXT -- New Column (Stores JSON)
-  );
-  
-  CREATE TABLE IF NOT EXISTS config (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );
+    -- 4. RESULTS (Final Grades for Leaderboard)
+    CREATE TABLE IF NOT EXISTS results (
+        username TEXT,
+        question_id TEXT,
+        status TEXT, -- 'Accepted', 'Wrong Answer', 'Compilation Error'
+        PRIMARY KEY (username, question_id)
+    );
 
-  INSERT OR IGNORE INTO config (key, value) VALUES ('autocomplete', 'true');
-  INSERT OR IGNORE INTO config (key, value) VALUES ('highlighting', 'true');
-
-  CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-  );
-  INSERT OR IGNORE INTO settings (key, value) VALUES ('blind_mode', 'false');
+    -- 5. SETTINGS (Global Config)
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    );
+    
+    -- Default Settings
+    INSERT OR IGNORE INTO settings (key, value) VALUES 
+    ('blind_mode', 'false'),       -- If true, hides error details from students
+    ('contest_active', 'true');    -- If false, rejects new logins
 `);
 
-console.log("✅ Database initialized successfully.");
+// --- HELPER: Generate ID ---
+const generateId = () => 'Q-' + Math.random().toString(36).substr(2, 5).toUpperCase();
 
-// Ensure Config Table Exists (Run this safely every time)
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS config (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
-    INSERT OR IGNORE INTO config (key, value) VALUES ('autocomplete', 'true');
-    INSERT OR IGNORE INTO config (key, value) VALUES ('highlighting', 'true');
-  `);
-} catch (err) {
-  console.error("Config Table Error:", err.message);
-}
+// ==========================================
+//              AUTHENTICATION API
+// ==========================================
 
-// --- 3. API ROUTES (The Skeleton) ---
-
-// Serve the Frontend Files
-// This line tells Express to serve files from the 'client' folder
-// Serve the React App (Production Build)
-app.use(express.static(path.join(__dirname, 'client/dist')));
-
-// Explicitly send index.html for the home route
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/index.html'));
-});
-
-// Login Logic (The Secure Gatekeeper)
 app.post('/api/login', (req, res) => {
-    const { username, pin } = req.body;
+    const { username, password } = req.body;
 
-    // 1. Check PIN
-    if (pin !== CLASS_PIN) {
-        return res.status(401).json({ error: "Invalid Class PIN" });
-    }
-
-    // 2. Check Admin
-    if (username === ADMIN_TOKEN) {
-        return res.json({ 
-            role: 'ADMIN', 
-            token: 'admin-session-' + crypto.randomUUID(),
-            username: 'Admin'
+    // 1. ADMIN LOGIN
+    if (username === ADMIN_KEY) {
+        return res.json({
+        role: 'admin',
+        username: 'ADMIN'
         });
     }
 
-    // 3. Check Student (First Come First Serve)
-    const existing = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    
-    if (existing) {
-        // If user exists, simplistic logic: reject (simulate "taken").
-        // In production, we'd check their browser token to allow re-login.
-        return res.status(409).json({ error: "Username already taken." });
+    // 2. CHECK CONTEST STATUS
+    const activeSetting = db.prepare("SELECT value FROM settings WHERE key='contest_active'").get();
+    if (activeSetting && activeSetting.value === 'false') {
+        return res.status(403).json({ error: "Contest is currently closed." });
     }
 
-    // Register new student
-    const token = crypto.randomUUID();
-    db.prepare('INSERT INTO users (username, role, token) VALUES (?, ?, ?)').run(username, 'STUDENT', token);
+    // 3. STUDENT LOGIN / REGISTRATION
+    let user = db.prepare("SELECT * FROM users WHERE username = ?").get(username);
 
-    return res.json({ role: 'STUDENT', token, username });
-});
-
-// --- CONFIG API ---
-
-app.get('/api/config', (req, res) => {
-    try {
-        const rows = db.prepare('SELECT key, value FROM config').all();
-        const config = {};
-        // Convert string 'true'/'false' back to boolean
-        rows.forEach(row => config[row.key] = (row.value === 'true'));
-        res.json(config);
-    } catch (err) {
-        console.error("GET Config Error:", err);
-        res.status(500).json({ error: "Failed to fetch config" });
-    }
-});
-
-app.post('/api/config', (req, res) => {
-    try {
-        const { key, value } = req.body;
-        console.log(`[CONFIG CHANGE] Setting ${key} to ${value}`); // <--- DEBUG LOG
+    if (!user) {
+        // Register new user & Start Timer
+        const now = Date.now();
+        try {
+            db.prepare("INSERT INTO users (username, role, start_time, session_token) VALUES (?, 'student', ?, 'active')")
+              .run(username, now);
+            user = { username, role: 'student', start_time: now, is_finished: 0 };
+        } catch (err) {
+            return res.status(500).json({ error: "Login failed" });
+        }
+    } else {
+        // Check if locked out
+        if (user.is_finished) {
+            return res.status(403).json({ error: "You have already submitted your contest." });
+        }
+        // Check session lock (Optional: strictly enforce single device)
+        if (user.session_token === 'active') {
+             // For a robust system, you might block them. 
+             // For this version, we allow re-login which kicks the previous session implicitly by UI state.
+             // return res.status(403).json({ error: "User already logged in!" });
+        }
         
-        // Store as string 'true' or 'false'
-        const stmt = db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)');
-        stmt.run(key, String(value));
-        
-        res.json({ success: true });
-    } catch (err) {
-        console.error("POST Config Error:", err);
-        res.status(500).json({ error: "Failed to update config" });
+        // Update session to active
+        db.prepare("UPDATE users SET session_token = 'active' WHERE username = ?").run(username);
     }
+
+    res.json({ 
+        success: true, 
+        role: 'student', 
+        username: user.username, 
+        start_time: user.start_time 
+    });
 });
 
-// --- ADMIN: QUESTION MANAGEMENT ---
-
-// Get all questions (for students and admin)
-app.get('/api/questions', (req, res) => {
-    try {
-        const rows = db.prepare('SELECT id, title, description, template FROM questions').all();
-        res.json(rows);
-    } catch (err) {
-        console.error("GET Questions Error:", err);
-        res.status(500).json({ error: "Failed to fetch questions" });
-    }
+app.post('/api/logout', (req, res) => {
+    const { username } = req.body;
+    db.prepare("UPDATE users SET session_token = NULL WHERE username = ?").run(username);
+    res.json({ success: true });
 });
 
-// Get all questions
-// const { v4: uuidv4 } = require('uuid'); // You might need to install this: npm install uuid
-// OR just use a simple random string generator if you don't want to install uuid
-const generateId = () => 'Q-' + Math.random().toString(36).substr(2, 5).toUpperCase();
+// ==========================================
+//              ADMIN APIs
+// ==========================================
 
+// 1. CREATE SMART QUESTION
+// Accepts: title, description, templates (obj), solution_code (Python), test_inputs (array)
 app.post('/api/questions', async (req, res) => {
-    const { title, description, template, solution_code, test_inputs } = req.body;
+    const { title, description, templates, solution_code, test_inputs } = req.body;
     
-    // 1. Generate ID automatically
     const id = generateId(); 
     const testCases = [];
 
     try {
-        // 2. GENERATE OUTPUTS (Run Reference Solution)
+        console.log(`[Admin] Generating outputs for ${title}...`);
+
+        // Run "Golden Solution" against every input to get the Expected Output
         for (const input of test_inputs) {
-            // Run the "Golden Code" on Judge0
             const judgeRes = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
                 source_code: solution_code,
-                language_id: 71, // Python
+                language_id: 71, // 71 is Python (Golden Solution Language)
                 stdin: input
             });
 
-            // If the reference solution fails, stop everything!
+            // If Golden Solution fails, abort!
             if (judgeRes.data.status.id !== 3) {
                 return res.status(400).json({ 
-                    error: `Reference solution failed on input: "${input}". Error: ${judgeRes.data.stderr}` 
+                    error: `Reference solution failed on input: "${input}".\nError: ${judgeRes.data.stderr}` 
                 });
             }
 
-            // Save the generated output
             testCases.push({
                 input: input,
                 output: judgeRes.data.stdout || "" 
             });
         }
 
-        // 3. Save to Database
+        // Save to DB
         const stmt = db.prepare(`
-            INSERT INTO questions (id, title, description, template, test_cases)
+            INSERT INTO questions (id, title, description, templates, test_cases)
             VALUES (?, ?, ?, ?, ?)
         `);
-        stmt.run(id, title, description, template, JSON.stringify(testCases));
+        stmt.run(id, title, description, JSON.stringify(templates), JSON.stringify(testCases));
 
+        console.log(`[Admin] Question ${id} created successfully.`);
         res.json({ success: true, id: id });
 
     } catch (err) {
@@ -230,163 +184,222 @@ app.post('/api/questions', async (req, res) => {
     }
 });
 
-
-// Delete a Question
+// 2. DELETE QUESTION
 app.delete('/api/questions/:id', (req, res) => {
     try {
         db.prepare('DELETE FROM questions WHERE id = ?').run(req.params.id);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: "Failed to delete" });
+        res.status(500).json({ error: "Delete failed" });
     }
 });
 
-// Get/Update Settings
+// 3. MANAGE SETTINGS (Blind Mode, Active Status)
 app.get('/api/settings', (req, res) => {
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'blind_mode'").get();
-    res.json({ blind_mode: row ? row.value === 'true' : false });
+    const blind = db.prepare("SELECT value FROM settings WHERE key = 'blind_mode'").get();
+    const active = db.prepare("SELECT value FROM settings WHERE key = 'contest_active'").get();
+    res.json({ 
+        blind_mode: blind ? blind.value === 'true' : false,
+        contest_active: active ? active.value === 'true' : true
+    });
 });
 
 app.post('/api/settings', (req, res) => {
-    const { blind_mode } = req.body;
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('blind_mode', ?)").run(String(blind_mode));
+    const { blind_mode, contest_active } = req.body;
+    const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    
+    if (blind_mode !== undefined) stmt.run('blind_mode', String(blind_mode));
+    if (contest_active !== undefined) stmt.run('contest_active', String(contest_active));
+    
     res.json({ success: true });
 });
 
-// --- SUBMISSION & LEADERBOARD API ---
-
-// 1. Submit Code (Auto-Graded)
-app.post('/api/submit', async (req, res) => {
-    const { username, question_id, code, elapsed_time } = req.body;
-    
+// 4. RESET CONTEST (Wipe Users & Results)
+app.post('/api/admin/reset', (req, res) => {
     try {
-        // 0. Prevent multiple submissions
-        const existing = db.prepare(`
-          SELECT 1 FROM submissions 
-          WHERE username = ? AND question_id = ?
-        `).get(username, question_id);
-
-        if (existing) {
-          return res.status(409).json({
-            error: "You have already submitted this question."
-          });
-        }
-
-        // 1. Fetch the Question & Test Cases
-        const question = db.prepare('SELECT test_cases FROM questions WHERE id = ?').get(question_id);
-        if (!question) return res.status(404).json({ error: "Question not found" });
-
-        const testCases = JSON.parse(question.test_cases);
-        let finalStatus = "Accepted"; // Assume success until proven fail
-
-        // 2. Run against ALL test cases
-        for (const test of testCases) {
-            const judgeRes = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
-                source_code: code,
-                language_id: 71, // Python
-                stdin: test.input,
-                expected_output: test.output // <--- The Magic: Judge0 compares this!
-            });
-
-            // Status ID 3 means "Accepted" (Correct Answer)
-            // Any other ID (4=Wrong Answer, 5=Time Limit, 6=Compilation Error) is a fail.
-            if (judgeRes.data.status.id !== 3) {
-                finalStatus = judgeRes.data.status.description; // e.g., "Wrong Answer"
-                break; // Stop testing if one fails
-            }
-        }
-
-        // 3. Save Result to DB
-        const stmt = db.prepare(`
-            INSERT INTO submissions (username, question_id, code, status, elapsed_time)
-            VALUES (?, ?, ?, ?, ?)
+        db.exec(`
+            DELETE FROM users;
+            DELETE FROM drafts;
+            DELETE FROM results;
+            UPDATE settings SET value = 'true' WHERE key = 'contest_active';
         `);
-        stmt.run(username, question_id, code, finalStatus, elapsed_time);
-
-        res.json({ success: true, status: finalStatus }); 
-
-    } catch (err) {
-        console.error("Submit Error:", err);
-        res.status(500).json({ error: "Grading Failed" });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: "Reset failed" });
     }
 });
 
-// 2. Get Leaderboard (For Admin)
-app.get('/api/leaderboard', (req, res) => {
-  try {
-    const rows = db.prepare(`
-      SELECT 
-        s.username,
-        s.question_id,
-        q.title,
-        s.status,
-        s.elapsed_time,
-        s.timestamp
-      FROM submissions s
-      LEFT JOIN questions q ON s.question_id = q.id
-      ORDER BY s.elapsed_time ASC
-    `).all();
+// ==========================================
+//              STUDENT APIs
+// ==========================================
 
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Leaderboard error" });
-  }
+// 1. GET ALL QUESTIONS (Without Test Cases)
+app.get('/api/questions', (req, res) => {
+    try {
+        // We do NOT select test_cases here to prevent cheating
+        const rows = db.prepare('SELECT id, title, description, templates FROM questions').all();
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch questions" });
+    }
 });
 
-// --- EXECUTION API ---
-
-const JUDGE0_URL = process.env.JUDGE0_URL || 'http://judge0:2358';
-
+// 2. RUN CODE (Test Run)
 app.post('/api/run', async (req, res) => {
+    const { code, language_id, stdin } = req.body;
     try {
-        const { code, language_id, stdin } = req.body;
         const response = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
             source_code: code,
             language_id: language_id,
             stdin: stdin
         });
 
-        // CHECK BLIND MODE
+        // Check Blind Mode
         const setting = db.prepare("SELECT value FROM settings WHERE key = 'blind_mode'").get();
         const isBlind = setting ? setting.value === 'true' : false;
 
         let output = response.data.stdout || "";
         let error = response.data.stderr || response.data.compile_output || "";
 
-        // IF BLIND MODE IS ON & THERE IS AN ERROR -> HIDE IT
+        // Hide Error if Blind Mode is ON
         if (isBlind && error) {
-            error = "🚫 Error Details Hidden (Debugging Mode Active)\nCheck your syntax and logic carefully.";
+            error = "🚫 Error Details Hidden (Blind Mode Active)\nCheck your syntax and logic carefully.";
         }
 
         res.json({ 
             output: output,
             error: error
         });
-
     } catch (err) {
-        console.error("Judge0 Error:", err.message);
         res.status(500).json({ error: "Execution Engine Failed" });
     }
 });
 
-// Handle React Routing (Redirect all unknown routes to index.html)
-app.get('*', (req, res) => {
-    // If the request is for an API, don't return HTML
-    if (req.path.startsWith('/api')) {
-        return res.status(404).json({ error: 'API endpoint not found' });
+// 3. SAVE DRAFT
+app.post('/api/save_draft', (req, res) => {
+    const { username, question_id, code, language_id } = req.body;
+    try {
+        db.prepare(`
+            INSERT OR REPLACE INTO drafts (username, question_id, code, language_id)
+            VALUES (?, ?, ?, ?)
+        `).run(username, question_id, code, language_id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: "Save failed" });
     }
+});
+
+// 4. GET DRAFTS (Load previous work)
+app.get('/api/drafts/:username', (req, res) => {
+    const rows = db.prepare("SELECT question_id, code, language_id FROM drafts WHERE username = ?").all(req.params.username);
+    res.json(rows);
+});
+
+// 5. FINISH CONTEST (Submit All & Grade)
+app.post('/api/finish_contest', async (req, res) => {
+    const { username } = req.body;
+    
+    try {
+        // 1. Lock the User
+        const now = Date.now();
+        db.prepare("UPDATE users SET is_finished = 1, end_time = ?, session_token = NULL WHERE username = ?").run(now, username);
+
+        // 2. Fetch all drafts for this user
+        const drafts = db.prepare("SELECT * FROM drafts WHERE username = ?").all(username);
+        const questions = db.prepare("SELECT * FROM questions").all();
+
+        // 3. Grade each draft
+        for (const draft of drafts) {
+            const question = questions.find(q => q.id === draft.question_id);
+            if (!question) continue;
+
+            const testCases = JSON.parse(question.test_cases || '[]');
+            let finalStatus = "Accepted";
+
+            // Run against all Hidden Test Cases
+            for (const test of testCases) {
+                try {
+                    const judgeRes = await axios.post(`${JUDGE0_URL}/submissions?base64_encoded=false&wait=true`, {
+                        source_code: draft.code,
+                        language_id: draft.language_id || 71, // Default Python if missing
+                        stdin: test.input,
+                        expected_output: test.output // Judge0 Auto-Compare
+                    });
+
+                    // ID 3 = Accepted. Anything else is a fail.
+                    if (judgeRes.data.status.id !== 3) {
+                        finalStatus = judgeRes.data.status.description; 
+                        break; 
+                    }
+                } catch (e) {
+                    finalStatus = "System Error";
+                    break;
+                }
+            }
+
+            // Save Final Result
+            db.prepare("INSERT OR REPLACE INTO results (username, question_id, status) VALUES (?, ?, ?)").run(username, draft.question_id, finalStatus);
+        }
+
+        res.json({ success: true });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Submission failed" });
+    }
+});
+
+// ==========================================
+//              SHARED APIs
+// ==========================================
+
+// LEADERBOARD (Ranked by Solved Count, then Time)
+app.get('/api/leaderboard', (req, res) => {
+    try {
+        // 1. Get Users and Times
+        const users = db.prepare("SELECT username, start_time, end_time FROM users WHERE is_finished = 1").all();
+        
+        const leaderboard = users.map(user => {
+            // Get all 'Accepted' results for this user
+            const solved = db.prepare("SELECT count(*) as count FROM results WHERE username = ? AND status = 'Accepted'").get(user.username);
+            
+            // Calculate Duration (ms)
+            const duration = user.end_time - user.start_time;
+
+            return {
+                username: user.username,
+                solved: solved.count,
+                timeMs: duration,
+                timeStr: new Date(duration).toISOString().substr(11, 8) // Format HH:MM:SS
+            };
+        });
+
+        // 2. Sort: Most Solved DESC, then Fastest Time ASC
+        leaderboard.sort((a, b) => {
+            if (b.solved !== a.solved) return b.solved - a.solved;
+            return a.timeMs - b.timeMs;
+        });
+
+        res.json(leaderboard);
+    } catch (err) {
+        res.status(500).json({ error: "Leaderboard error" });
+    }
+});
+
+app.use(express.static(path.join(__dirname, 'client/dist')));
+
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'client/dist/index.html'));
 });
 
-// --- 4. STARTUP MESSAGE ---
+// Start Server
 app.listen(PORT, () => {
-    console.log(`\n\n`);
-    console.log(`==================================================`);
-    console.log(`   🚀 CONTEST SERVER STARTED on Port ${PORT}`);
-    console.log(`   🔐 CLASS PIN:        ${CLASS_PIN}`);
-    console.log(`   👑 ADMIN USERNAME:   ${ADMIN_TOKEN}`);
-    console.log(`   (Copy the Admin Username above to login)`);
-    console.log(`==================================================`);
-    console.log(`\n`);
+  console.log(`==================================================`);
+  console.log(`🚀 Contest Server Started`);
+  console.log(`🌐 URL: http://localhost:${PORT}`);
+  console.log(`🔐 ADMIN LOGIN KEY: ${ADMIN_KEY}`);
+  console.log(`⚠️  Save this key. It changes every restart.`);
+  console.log(`==================================================`);
 });
