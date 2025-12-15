@@ -1,3 +1,5 @@
+import { styles } from './styles';
+
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Editor from "@monaco-editor/react";
@@ -211,9 +213,21 @@ const AdminDashboard = () => {
               <label>Test Inputs (for generating outputs):</label>
               {newQ.inputs.map((inp, i) => (
                 <div key={i} style={{marginBottom:'5px'}}>
-                  <input value={inp} onChange={e=>{
-                    const up = [...newQ.inputs]; up[i]=e.target.value; setNewQ({...newQ, inputs:up});
-                  }} style={styles.input} placeholder={`Input Case ${i+1}`} />
+                  <textarea
+                    value={inp}
+                    onChange={e => {
+                      const up = [...newQ.inputs];
+                      up[i] = e.target.value;
+                      setNewQ({ ...newQ, inputs: up });
+                    }}
+                    placeholder={`Test Case ${i + 1} (multiline allowed)`}
+                    style={{
+                      ...styles.input,
+                      height: '80px',
+                      fontFamily: 'monospace',
+                      whiteSpace: 'pre-wrap'
+                    }}
+                  />
                 </div>
               ))}
               <button onClick={()=>setNewQ({...newQ, inputs:[...newQ.inputs, '']})} style={styles.btnSmall}>+ Add Case</button>
@@ -385,7 +399,7 @@ const StudentDashboard = ({ user, onLogout }) => {
         </div>
         <div style={{display:'flex', alignItems:'center', gap:'20px'}}>
           <div style={{fontSize:'1.2em', fontFamily:'monospace'}}>⏱️ {elapsed}</div>
-          <button onClick={handleFinishContest} style={{...styles.btn, background:'#d9534f'}}>🏁 Finish Contest</button>
+          <button onClick={handleFinishContest} style={{...styles.btn, background:'#d9534f'}}> Finish Contest & Submit</button>
         </div>
       </header>
 
@@ -451,29 +465,6 @@ const App = () => {
 
   if (!user) return <Login onLogin={setUser} />;
   return user.role === 'admin' ? <AdminDashboard /> : <StudentDashboard user={user} onLogout={handleLogout} />;
-};
-
-// ==========================================
-//           STYLES
-// ==========================================
-const styles = {
-  centerBox: { height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#1e1e1e', color:'white' },
-  loginCard: { padding: '40px', background: '#252526', borderRadius: '10px', textAlign: 'center', width: '300px' },
-  dashboard: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1e1e1e', color: 'white' },
-  header: { padding: '10px 20px', background: '#252526', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  splitView: { flex: 1, display: 'flex', overflow: 'hidden' },
-  input: { width: '100%', padding: '10px', marginBottom: '10px', background: '#333', border: '1px solid #555', color: 'white', borderRadius: '4px' },
-  select: { padding: '8px', background: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px' },
-  btn: { padding: '8px 15px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'white' },
-  btnPrimary: { padding: '10px 20px', cursor: 'pointer', border: 'none', borderRadius: '4px', background: '#007bff', color: 'white', fontWeight: 'bold' },
-  btnSmall: { padding: '5px 10px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'white', fontSize: '0.8em' },
-  table: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
-  tabs: { display: 'flex', borderBottom: '1px solid #444' },
-  tab: { padding: '15px 30px', background: 'transparent', color: '#aaa', border: 'none', cursor: 'pointer' },
-  activeTab: { padding: '15px 30px', background: '#252526', color: 'white', border: 'none', cursor: 'pointer', borderBottom: '2px solid #007bff' },
-  card: { padding: '15px', background: '#333', borderRadius: '5px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' },
-  codeMsg: { width: '100%', background: '#111', color: '#0f0', border: '1px solid #333', padding: '10px', fontFamily: 'monospace' },
-  terminal: { flex:1, background: 'transparent', color: 'white', border: 'none', resize: 'none', padding: '10px', fontFamily: 'monospace' }
 };
 
 export default App;
