@@ -76,7 +76,7 @@ const Login = ({ onLogin }) => {
 // ==========================================
 //           2. ADMIN DASHBOARD
 // ==========================================
-const AdminDashboard = () => {
+const AdminDashboard = ({ onLogout }) => {
   const [tab, setTab] = useState('leaderboard');
   const [submissions, setSubmissions] = useState([]);
   const [questions, setQuestions] = useState([]);
@@ -252,7 +252,7 @@ const AdminDashboard = () => {
             {settings.contest_active ? "Contest: OPEN" : "Contest: CLOSED"}
           </button>
           <button onClick={handleReset} style={{...styles.btn, background: 'red'}}>Reset</button>
-          <button onClick={logout} style={{...styles.btn, background: 'red'}}>Logout</button>
+          {/* <button onClick={logout} style={{...styles.btn, background: 'red'}}>Logout</button> */}
         </div>
       </header>
 
@@ -608,7 +608,7 @@ const App = () => {
   };
 
   if (!user) return <Login onLogin={setUser} />;
-  return user.role === 'admin' ? <AdminDashboard /> : <StudentDashboard user={user} onLogout={handleLogout} />;
+  return user.role === 'admin' ? <AdminDashboard onLogout={handleLogout} /> : <StudentDashboard user={user} onLogout={handleLogout} />;
 };
 
 export default App;

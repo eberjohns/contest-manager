@@ -1,1 +1,2 @@
+when stop contest, the first log time will be reset to 0 so when start contest, then when they enter, the timer starts from 0.
 make it executable
