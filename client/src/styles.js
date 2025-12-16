@@ -4,7 +4,7 @@ export const styles = {
     display: 'flex',
     flexDirection: 'column',
     background: '#1e1e1e',
-    color: 'white'
+    color: 'white',
   },
 
   header: {
@@ -29,7 +29,7 @@ export const styles = {
     flex: 1,
     display: 'flex',
     minHeight: 0,
-    overflow: 'hidden'
+    overflow: 'hidden',
   },
 
   leftPane: {
@@ -98,7 +98,49 @@ export const styles = {
   input: { width: '100%', padding: '10px', marginBottom: '10px', background: '#333', border: '1px solid #555', color: 'white', borderRadius: '4px' },
   btn: { padding: '8px 15px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'white' },
   btnSmall: { padding: '5px 10px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'black', fontSize: '0.8em' },
-  table: { width: '100%', borderCollapse: 'collapse', marginTop: '20px' },
+  table: { 
+    width: '95%', 
+    margin: '40px auto', 
+    borderCollapse: 'collapse',
+    boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
+    borderRadius: '8px',
+    overflow: 'hidden'
+  },
+  tableHeaderCell: {
+    padding: '12px 15px',
+    background: '#007acc',
+    color: '#eee',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em'
+  },
+  tableCell: {
+    padding: '15px',
+    borderBottom: '1px solid #444',
+    textAlign: 'center'
+  },
+  tableRowEven: {
+      background: '#252526'
+  },
+  modalBackdrop: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0,0,0,0.6)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000
+  },
+  modal: {
+    background: '#252526',
+    padding: '20px',
+    width: '80%',
+    maxWidth: '900px',
+    borderRadius: '8px'
+  },
   tabs: { display: 'flex', borderBottom: '1px solid #444' },
   tab: { padding: '15px 30px', background: 'transparent', color: '#aaa', border: 'none', cursor: 'pointer' },
   activeTab: { padding: '15px 30px', background: '#252526', color: 'white', border: 'none', cursor: 'pointer', borderBottom: '2px solid #007bff' },

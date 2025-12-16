@@ -53,6 +53,8 @@ db.exec(`
         username TEXT,
         question_id TEXT,
         status TEXT, -- 'Accepted', 'Wrong Answer', 'Compilation Error'
+        code TEXT,
+        language_id INTEGER,
         PRIMARY KEY (username, question_id)
     );
 
@@ -224,6 +226,27 @@ app.get('/api/settings', (req, res) => {
     });
 });
 
+app.get('/api/admin/submission-code', (req, res) => {
+  const { username, question_id } = req.query;
+
+  if (!username || !question_id) {
+    return res.status(400).json({ error: "Missing parameters" });
+  }
+
+  const row = db.prepare(`
+    SELECT r.code, r.language_id, q.title
+    FROM results r
+    JOIN questions q ON r.question_id = q.id
+    WHERE r.username=? AND r.question_id=?
+  `).get(username, question_id);
+
+  if (!row) {
+    return res.status(404).json({ error: "Submission not found" });
+  }
+
+  res.json(row);
+});
+
 app.post('/api/settings', (req, res) => {
     const { blind_mode, contest_active } = req.body;
     const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
@@ -247,6 +270,17 @@ app.post('/api/admin/reset', (req, res) => {
     } catch(e) {
         res.status(500).json({ error: "Reset failed" });
     }
+});
+
+app.get('/api/admin/submissions/:username', (req, res) => {
+    const { username } = req.params;
+    const rows = db.prepare(`
+        SELECT r.question_id, q.title 
+        FROM results r
+        JOIN questions q ON r.question_id = q.id
+        WHERE r.username = ? AND r.status = 'Accepted'
+    `).all(username);
+    res.json(rows);
 });
 
 // ==========================================
@@ -358,7 +392,17 @@ app.post('/api/finish_contest', async (req, res) => {
             }
 
             // Save Final Result
-            db.prepare("INSERT OR REPLACE INTO results (username, question_id, status) VALUES (?, ?, ?)").run(username, draft.question_id, finalStatus);
+            db.prepare(`
+            INSERT OR REPLACE INTO results
+            (username, question_id, status, code, language_id)
+            VALUES (?, ?, ?, ?, ?)
+            `).run(
+            username,
+            draft.question_id,
+            finalStatus,
+            draft.code,
+            draft.language_id
+            );
         }
 
         res.json({ success: true });

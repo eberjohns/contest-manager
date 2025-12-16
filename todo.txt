@@ -1,5 +1,3 @@
-scroll for overflow things(especially admin when creating questions)
-when we click 'view code' the submission row in leaderboard, the submitted code should be shown
 add option to enable and disable questions from admin for test and live
 styling
 make it executable

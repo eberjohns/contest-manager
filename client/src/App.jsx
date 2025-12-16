@@ -18,6 +18,10 @@ const SUPPORTED_LANGUAGES = [
   { id: 63, name: "JavaScript (Node.js)" }
 ];
 
+const LANGUAGE_MAP = Object.fromEntries(
+  SUPPORTED_LANGUAGES.map(l => [l.id, l.monaco])
+);
+
 // ==========================================
 //           1. LOGIN SCREEN
 // ==========================================
@@ -48,7 +52,7 @@ const Login = ({ onLogin }) => {
   return (
     <div style={styles.centerBox}>
       <div style={styles.loginCard}>
-        <h2>🚀 Contest Platform</h2>
+        <h2>Contest Platform</h2>
         <input 
           style={styles.input} 
           placeholder="Username" 
@@ -116,6 +120,36 @@ const AdminDashboard = () => {
     fetchData();
   };
 
+  const [codeModal, setCodeModal] = useState(null);
+  const [submissionsModal, setSubmissionsModal] = useState(null);
+
+  const openCodeModal = async (username, questionId) => {
+    try {
+      const res = await api.get('/api/admin/submission-code', {
+        params: { username, question_id: questionId }
+      });
+      setCodeModal(res.data);
+    } catch (err) {
+      alert("Failed to load submitted code");
+    }
+  };
+
+  const openSubmissionsListModal = async (username) => {
+    try {
+        const res = await api.get(`/api/admin/submissions/${username}`);
+        if (!Array.isArray(res.data)) {
+            console.error("API did not return an array for submissions:", res.data);
+            alert("Error: submissions data is not in the expected format.");
+            setSubmissionsModal({ username, submissions: [] }); // Set to empty array to prevent crash
+            return;
+        }
+        setSubmissionsModal({ username, submissions: res.data });
+    } catch (err) {
+        console.error("Failed to load submissions:", err);
+        alert('Failed to load submissions for user.');
+    }
+  };
+
   // --- QUESTION MANAGEMENT ---
   const toggleLanguage = (langId) => {
     const updated = { ...newQ.templates };
@@ -160,8 +194,56 @@ const AdminDashboard = () => {
 
   return (
     <div style={styles.dashboard}>
+      {codeModal && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modal}>
+            <h3>{codeModal.title}</h3>
+
+            <Editor
+              height="400px"
+              theme="vs-dark"
+              language={LANGUAGE_MAP[codeModal.language_id] || "plaintext"}
+              value={codeModal.code}
+              options={{ readOnly: true }}
+            />
+
+            <button
+              style={{ ...styles.btnPrimary, marginTop: '10px' }}
+              onClick={() => setCodeModal(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {submissionsModal && (
+        <div style={styles.modalBackdrop}>
+          <div style={styles.modal}>
+            <h3>Submissions for {submissionsModal.username}</h3>
+            {Array.isArray(submissionsModal.submissions) && submissionsModal.submissions.map(sub => (
+              <div key={sub.question_id} style={{ ...styles.card, justifyContent: 'space-between' }}>
+                <span>{sub.title}</span>
+                <button
+                  onClick={() => openCodeModal(submissionsModal.username, sub.question_id)}
+                  style={styles.btnSmall}
+                >
+                  View Code
+                </button>
+              </div>
+            ))}
+            <button
+              style={{ ...styles.btnPrimary, marginTop: '10px' }}
+              onClick={() => setSubmissionsModal(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       <header style={styles.header}>
-        <h1>👑 Admin Console</h1>
+        <h1>Admin Console</h1>
         <div style={{display:'flex', gap:'10px'}}>
           <button onClick={() => toggleSetting('blind_mode')} style={{...styles.btn, background: settings.blind_mode ? '#d9534f' : '#333'}}>
             {settings.blind_mode ? "Blind Mode: ON" : "Blind Mode: OFF"}
@@ -175,22 +257,30 @@ const AdminDashboard = () => {
       </header>
 
       <div style={styles.tabs}>
-        <button onClick={() => setTab('leaderboard')} style={tab==='leaderboard'?styles.activeTab:styles.tab}>🏆 Leaderboard</button>
-        <button onClick={() => setTab('questions')} style={tab==='questions'?styles.activeTab:styles.tab}>📝 Manage Questions</button>
+        <button onClick={() => setTab('leaderboard')} style={tab==='leaderboard'?styles.activeTab:styles.tab}>Leaderboard</button>
+        <button onClick={() => setTab('questions')} style={tab==='questions'?styles.activeTab:styles.tab}>Manage Questions</button>
       </div>
 
       {tab === 'leaderboard' ? (
         <table style={styles.table}>
           <thead>
-            <tr><th>Rank</th><th>User</th><th>Solved</th><th>Time</th></tr>
+            <tr><th>Rank</th><th>User</th><th>Solved</th><th>Time</th><th>View Code</th></tr>
           </thead>
           <tbody>
             {submissions.map((sub, i) => (
               <tr key={i}>
-                <td>#{i+1}</td>
-                <td>{sub.username}</td>
-                <td style={{color:'#0f0'}}>{sub.solved} / {questions.length}</td>
-                <td>{sub.timeStr}</td>
+                <td style={{ textAlign: 'center' }}>{i+1}</td>
+                <td style={{ textAlign: 'center' }}>{sub.username}</td>
+                <td style={{ textAlign: 'center', color:'#0f0'}}>{sub.solved} / {questions.length}</td>
+                <td style={{ textAlign: 'center' }}>{sub.timeStr}</td>
+                <td style={{ textAlign: 'center' }}>
+                  <button
+                    onClick={() => openSubmissionsListModal(sub.username)}
+                    style={styles.btnSmall}
+                  >
+                    	👁
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -207,7 +297,7 @@ const AdminDashboard = () => {
             ))}
           </div>
 
-          <div style={{flex:2, background:'#252526', padding:'20px', borderRadius:'8px'}}>
+          <div style={{flex:2, background:'#252526', padding:'20px', borderRadius:'8px', overflowY:'auto'}}>
             <h3>Add Smart Question</h3>
             <input placeholder="Title" value={newQ.title} onChange={e=>setNewQ({...newQ, title:e.target.value})} style={styles.input} />
             <textarea placeholder="Description" value={newQ.description} onChange={e=>setNewQ({...newQ, description:e.target.value})} style={{...styles.input, height:'60px'}} />
@@ -398,7 +488,7 @@ const StudentDashboard = ({ user, onLogout }) => {
       {/* TOP BAR */}
       <header style={styles.header}>
         <div style={{display:'flex', alignItems:'center', gap:'15px'}}>
-          <h3>🚀 Contest</h3>
+          <h3>Contest</h3>
           <select value={activeQ?.id || ""} onChange={e => setActiveQ(questions.find(q => q.id === e.target.value))} style={styles.select}>
             {questions.map(q => <option key={q.id} value={q.id}>{q.title}</option>)}
           </select>
