@@ -100,7 +100,7 @@ const AdminDashboard = () => {
     try { const res = await api.get('/api/leaderboard'); setSubmissions(res.data); } catch(e){}
   };
   const fetchQuestions = async () => {
-    try { const res = await api.get('/api/questions'); setQuestions(res.data); } catch(e){}
+    try { const res = await api.get('/api/admin/questions'); setQuestions(res.data); } catch(e){}
   };
   const fetchSettings = async () => {
     try { const res = await api.get('/api/settings'); setSettings(res.data); } catch(e){}
@@ -292,6 +292,18 @@ const AdminDashboard = () => {
             {questions.map(q => (
               <div key={q.id} style={styles.card}>
                 <div style={{fontWeight:'bold'}}>{q.title}</div>
+                <button
+                  onClick={async () => {
+                    await api.post(`/api/questions/${q.id}/toggle`);
+                    fetchQuestions();
+                  }}
+                  style={{
+                    ...styles.btnSmall,
+                    background: q.is_enabled ? '#d9534f' : '#28a745'
+                  }}
+                >
+                  {q.is_enabled ? 'Disable' : 'Enable'}
+                </button>
                 <button onClick={async () => { if(confirm("Delete?")) { await api.delete(`/api/questions/${q.id}`); fetchQuestions(); }}} style={{color:'red', background:'none', border:'none'}}>Delete</button>
               </div>
             ))}
@@ -365,7 +377,7 @@ const AdminDashboard = () => {
             </div>
 
             <button onClick={handleSaveQuestion} disabled={loading} style={{...styles.btnPrimary, marginTop:'20px', width:'100%'}}>
-              {loading ? "⏳ Validating..." : "💾 Auto-Verify & Save"}
+              {loading ? "Validating..." : "Auto-Verify & Save"}
             </button>
           </div>
         </div>

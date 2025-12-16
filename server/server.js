@@ -36,7 +36,8 @@ db.exec(`
         title TEXT,
         description TEXT,
         templates TEXT,        -- JSON: {"71": "python_code", "54": "cpp_code"}
-        test_cases TEXT        -- JSON: [{input, output}, {input, output}]
+        test_cases TEXT,        -- JSON: [{input, output}, {input, output}]
+        is_enabled INTEGER DEFAULT 0
     );
 
     -- 3. DRAFTS (Saves student work in progress)
@@ -226,6 +227,20 @@ app.get('/api/settings', (req, res) => {
     });
 });
 
+app.post('/api/questions/:id/toggle', (req, res) => {
+  try {
+    db.prepare(`
+      UPDATE questions
+      SET is_enabled = CASE is_enabled WHEN 1 THEN 0 ELSE 1 END
+      WHERE id = ?
+    `).run(req.params.id);
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Toggle failed" });
+  }
+});
+
 app.get('/api/admin/submission-code', (req, res) => {
   const { username, question_id } = req.query;
 
@@ -283,6 +298,17 @@ app.get('/api/admin/submissions/:username', (req, res) => {
     res.json(rows);
 });
 
+app.get('/api/admin/questions', (req, res) => {
+    try {
+        const questions = db.prepare(
+            "SELECT id, title, description, templates, is_enabled FROM questions"
+        ).all();
+        res.json(questions);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to fetch admin questions" });
+    }
+});
+
 // ==========================================
 //              STUDENT APIs
 // ==========================================
@@ -291,8 +317,10 @@ app.get('/api/admin/submissions/:username', (req, res) => {
 app.get('/api/questions', (req, res) => {
     try {
         // We do NOT select test_cases here to prevent cheating
-        const rows = db.prepare('SELECT id, title, description, templates FROM questions').all();
-        res.json(rows);
+        const questions = db.prepare(
+            "SELECT id, title, description, templates FROM questions WHERE is_enabled = 1"
+        ).all();
+        res.json(questions);
     } catch (err) {
         res.status(500).json({ error: "Failed to fetch questions" });
     }
