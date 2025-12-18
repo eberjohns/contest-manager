@@ -510,12 +510,24 @@ app.get('*', (req, res) => {
 });
 
 // Start Server
+const fs = require('fs');
 app.listen(PORT, () => {
-  console.log(`==================================================`);
-  console.log(`🚀 Contest Server Started`);
-  console.log(`🌐 URL: http://localhost:${PORT}`);
-  console.log(`🔐 ADMIN LOGIN KEY: ${ADMIN_USERNAME}`);
-  console.log(`🔐 CLASS PIN ACTIVE: ${CLASS_PIN}`);
-  console.log(`⚠️  Save this key. It changes every restart.`);
-  console.log(`==================================================`);
+    const credentials = {
+        admin_username: ADMIN_USERNAME,
+        class_pin: CLASS_PIN,
+        url: `http://localhost:${PORT}`
+    };
+    // Ensure data directory exists before writing credentials
+    const dataDir = path.join(__dirname, './data');
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(dataDir, 'credentials.json'), JSON.stringify(credentials, null, 2));
+    console.log(`==================================================`);
+    console.log(`🚀 Contest Server Started`);
+    console.log(`🌐 URL: http://localhost:${PORT}`);
+    console.log(`🔐 ADMIN LOGIN KEY: ${ADMIN_USERNAME}`);
+    console.log(`🔐 CLASS PIN ACTIVE: ${CLASS_PIN}`);
+    console.log(`⚠️  Save this key. It changes every restart.`);
+    console.log(`==================================================`);
 });
