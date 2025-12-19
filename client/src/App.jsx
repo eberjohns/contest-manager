@@ -5,7 +5,9 @@ import axios from 'axios';
 import Editor from "@monaco-editor/react";
 
 // --- CONFIGURATION ---
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// const API_URL = 'http://172.27.32.102:3000';
+const API_URL = window.location.origin;
 
 const api = axios.create({ baseURL: API_URL });
 
