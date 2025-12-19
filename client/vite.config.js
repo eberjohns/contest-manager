@@ -3,9 +3,10 @@ import react from '@vitejs/plugin-react';
 import monacoEditorPlugin from 'vite-plugin-monaco-editor';
 
 export default defineConfig({
+  base: './', 
+
   plugins: [
     react(),
-    // FIX: Check for .default to handle the import compatibility issue
     (monacoEditorPlugin.default || monacoEditorPlugin)({
       languageWorkers: [
         'editorWorkerService',
@@ -13,7 +14,8 @@ export default defineConfig({
         'css',
         'html',
         'typescript'
-      ]
+      ],
+      publicPath: 'monacoeditorwork' 
     })
   ],
   server: {
