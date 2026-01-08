@@ -1,150 +1,268 @@
 export const styles = {
   dashboard: {
-    height: '100vh',
+    minHeight: '100vh',
     display: 'flex',
     flexDirection: 'column',
-    background: '#1e1e1e',
-    color: 'white',
+    background: 'linear-gradient(135deg, #232526 0%, #414345 100%)',
+    color: '#222',
+    fontFamily: 'Segoe UI, Arial, sans-serif',
   },
 
   header: {
-    padding: '10px 20px',
-    background: '#252526',
-    borderBottom: '1px solid #333',
+    padding: '16px 24px',
+    background: '#222',
+    borderBottom: '1px solid #444',
     display: 'flex',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     alignItems: 'center',
     position: 'sticky',
     top: 0,
-    zIndex: 10
+    zIndex: 10,
   },
 
   main: {
     flex: 1,
     display: 'flex',
-    minHeight: 0
+    flexDirection: 'row',
+    minHeight: 0,
+    gap: '24px',
+    padding: '24px',
   },
 
   splitView: {
     flex: 1,
     display: 'flex',
+    flexDirection: 'row',
     minHeight: 0,
+    gap: '24px',
     overflow: 'hidden',
   },
 
   leftPane: {
     flex: 1,
-    padding: '20px',
+    padding: '16px',
     overflowY: 'auto',
-    borderRight: '1px solid #333',
-    minHeight: 0
+    borderRight: '1px solid #eee',
+    minHeight: 0,
+    background: '#fff',
+    borderRadius: '12px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
   },
 
   rightPane: {
     flex: 1.5,
     display: 'flex',
     flexDirection: 'column',
-    minHeight: 0
+    minHeight: 0,
+    background: '#fff',
+    borderRadius: '12px',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+    padding: '16px',
   },
 
   editorContainer: {
     flex: 1,
-    minHeight: 0
+    minHeight: 0,
+    marginBottom: '16px',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    background: '#f7f7f7',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
   },
 
   terminalBox: {
-    height: '180px',
+    height: '160px',
     display: 'flex',
-    borderTop: '1px solid #333',
-    background: '#1e1e1e'
+    borderTop: '1px solid #eee',
+    background: '#fafafa',
+    borderRadius: '8px',
+    marginTop: '8px',
   },
 
   terminalPane: {
     flex: 1,
-    padding: '10px',
+    padding: '12px',
     fontFamily: 'monospace',
     overflowY: 'auto',
-    minHeight: 0
+    minHeight: 0,
+    background: '#f5f5f5',
+    borderRadius: '8px',
   },
 
   actionBar: {
-    padding: '10px',
-    background: '#252526',
-    borderTop: '1px solid #333',
+    padding: '12px',
+    background: '#222',
+    borderTop: '1px solid #444',
     display: 'flex',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
-    gap: '10px'
+    gap: '12px',
+    borderRadius: '0 0 12px 12px',
   },
 
   btnPrimary: {
-    padding: '10px 20px',
-    background: '#007acc',
+    padding: '12px 28px',
+    background: 'linear-gradient(90deg, #007bff 0%, #00c6ff 100%)',
     border: 'none',
-    borderRadius: '4px',
-    color: 'white',
+    borderRadius: '6px',
+    color: '#fff',
     cursor: 'pointer',
-    fontWeight: 'bold'
+    fontWeight: 'bold',
+    fontSize: '1rem',
+    boxShadow: '0 2px 8px rgba(0,123,255,0.08)',
+    transition: 'background 0.2s',
   },
 
   select: {
-    padding: '8px',
-    background: '#333',
-    color: 'white',
-    border: '1px solid #555',
-    borderRadius: '4px'
+    padding: '10px',
+    background: '#f0f0f0',
+    color: '#222',
+    border: '1px solid #ccc',
+    borderRadius: '6px',
+    fontSize: '1rem',
   },
-  centerBox: { height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#1e1e1e', color:'white' },
-  loginCard: { padding: '40px', background: '#252526', borderRadius: '10px', textAlign: 'center', width: '300px' },
-  input: { width: '100%', padding: '10px', marginBottom: '10px', background: '#333', border: '1px solid #555', color: 'white', borderRadius: '4px' },
-  btn: { padding: '8px 15px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'white' },
-  btnSmall: { padding: '5px 10px', cursor: 'pointer', border: 'none', borderRadius: '4px', color: 'black', fontSize: '0.8em' },
-  table: { 
-    width: '95%', 
-    margin: '40px auto', 
-    borderCollapse: 'collapse',
-    boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
-    borderRadius: '8px',
-    overflow: 'hidden'
-  },
-  tableHeaderCell: {
-    padding: '12px 15px',
-    background: '#007acc',
-    color: '#eee',
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em'
-  },
-  tableCell: {
-    padding: '15px',
-    borderBottom: '1px solid #444',
-    textAlign: 'center'
-  },
-  tableRowEven: {
-      background: '#252526'
-  },
-  modalBackdrop: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.6)',
+
+  centerBox: {
+    minHeight: '100vh',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000
+    background: 'linear-gradient(135deg, #232526 0%, #414345 100%)',
+    color: '#222',
   },
-  modal: {
-    background: '#252526',
-    padding: '20px',
-    width: '80%',
-    maxWidth: '900px',
-    borderRadius: '8px'
+
+  loginCard: {
+    padding: '40px 32px',
+    background: '#fff',
+    borderRadius: '16px',
+    textAlign: 'center',
+    width: '320px',
+    boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
+    border: '1px solid #eee',
   },
-  tabs: { display: 'flex', borderBottom: '1px solid #444' },
-  tab: { padding: '15px 30px', background: 'transparent', color: '#aaa', border: 'none', cursor: 'pointer' },
-  activeTab: { padding: '15px 30px', background: '#252526', color: 'white', border: 'none', cursor: 'pointer', borderBottom: '2px solid #007bff' },
-  card: { padding: '15px', background: '#333', borderRadius: '5px', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' },
-  codeMsg: { width: '100%', background: '#111', color: '#0f0', border: '1px solid #333', padding: '10px', fontFamily: 'monospace' },
-  terminal: { flex:1, background: 'transparent', color: 'white', border: 'none', resize: 'none', padding: '10px', fontFamily: 'monospace' }
+
+  input: {
+    width: '100%',
+    padding: '12px',
+    marginBottom: '14px',
+    background: '#f7f7f7',
+    border: '1px solid #ccc',
+    color: '#222',
+    borderRadius: '6px',
+    fontSize: '1rem',
+    boxSizing: 'border-box',
+  },
+
+  btn: {
+    padding: '10px 20px',
+    cursor: 'pointer',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#fff',
+    background: '#007bff',
+    fontWeight: 'bold',
+    fontSize: '1rem',
+    margin: '0 4px',
+    transition: 'background 0.2s',
+  },
+
+  btnSmall: {
+    padding: '6px 12px',
+    cursor: 'pointer',
+    border: 'none',
+    borderRadius: '6px',
+    color: '#fff',
+    background: '#6c757d',
+    fontSize: '0.85em',
+    margin: '0 2px',
+  },
+
+  table: {
+    width: '100%',
+    margin: '32px auto',
+    borderCollapse: 'collapse',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    background: '#fff',
+  },
+
+  tableHeaderCell: {
+    padding: '14px 16px',
+    background: 'linear-gradient(90deg, #007bff 0%, #00c6ff 100%)',
+    color: '#fff',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    fontWeight: 'bold',
+    fontSize: '1rem',
+    borderBottom: '1px solid #eee',
+  },
+
+  tableCell: {
+    padding: '12px 14px',
+    textAlign: 'center',
+    borderBottom: '1px solid #eee',
+    fontSize: '1rem',
+  },
+
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100vw',
+    height: '100vh',
+    background: 'rgba(0,0,0,0.3)',
+    zIndex: 1000,
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  modalContent: {
+    background: '#fff',
+    borderRadius: '12px',
+    padding: '32px 24px',
+    minWidth: '320px',
+    maxWidth: '90vw',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+    position: 'relative',
+  },
+
+  closeModalBtn: {
+    position: 'absolute',
+    top: '12px',
+    right: '16px',
+    background: 'transparent',
+    border: 'none',
+    fontSize: '1.5rem',
+    color: '#888',
+    cursor: 'pointer',
+  },
+
+  // Responsive styles (to be used with className or inline logic)
+  '@media (max-width: 900px)': {
+    main: {
+      flexDirection: 'column',
+      padding: '12px',
+      gap: '12px',
+    },
+    splitView: {
+      flexDirection: 'column',
+      gap: '12px',
+    },
+    leftPane: {
+      minWidth: 0,
+      borderRight: 'none',
+      borderBottom: '1px solid #eee',
+    },
+    rightPane: {
+      minWidth: 0,
+      padding: '12px',
+    },
+    loginCard: {
+      width: '95vw',
+      padding: '24px 8px',
+    },
+  },
 };
