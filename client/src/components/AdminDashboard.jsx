@@ -134,8 +134,8 @@ const AdminDashboard = ({ onLogout }) => {
       overflow: 'hidden',
     }}>
       {codeModal && (
-        <div style={styles.modalBackdrop}>
-          <div style={styles.modal}>
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalContent}>
             <h3>{codeModal.title}</h3>
 
             <Editor
@@ -157,8 +157,8 @@ const AdminDashboard = ({ onLogout }) => {
       )}
 
       {submissionsModal && (
-        <div style={styles.modalBackdrop}>
-          <div style={styles.modal}>
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalContent}>
             <h3>Submissions for {submissionsModal.username}</h3>
             {Array.isArray(submissionsModal.submissions) && submissionsModal.submissions.map(sub => (
               <div key={sub.question_id} style={{ ...styles.card, justifyContent: 'space-between' }}>
