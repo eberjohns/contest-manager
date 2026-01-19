@@ -290,10 +290,10 @@ app.post('/api/admin/reset', (req, res) => {
 app.get('/api/admin/submissions/:username', (req, res) => {
     const { username } = req.params;
     const rows = db.prepare(`
-        SELECT r.question_id, q.title 
+        SELECT r.question_id, q.title, r.status
         FROM results r
         JOIN questions q ON r.question_id = q.id
-        WHERE r.username = ? AND r.status = 'Accepted'
+        WHERE r.username = ?
     `).all(username);
     res.json(rows);
 });
